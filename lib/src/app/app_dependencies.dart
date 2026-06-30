@@ -3,6 +3,7 @@ import '../core/session/session_manager.dart';
 import '../features/auth/data/repositories/remote_auth_repository.dart';
 import '../features/auth/domain/repositories/auth_repository.dart';
 import '../features/chat/data/repositories/remote_chat_repository.dart';
+import '../features/chat/data/pusher_chat_service.dart';
 import '../features/chat/domain/repositories/chat_repository.dart';
 import '../features/friends/data/repositories/remote_friends_repository.dart';
 import '../features/friends/domain/repositories/friends_repository.dart';
@@ -17,6 +18,9 @@ class AppDependencies {
   static final apiClient = ApiClient(sessionManager: sessionManager);
   static final notificationService = NotificationService(
     apiClient: apiClient,
+    sessionManager: sessionManager,
+  );
+  static final pusherChatService = PusherChatService(
     sessionManager: sessionManager,
   );
 

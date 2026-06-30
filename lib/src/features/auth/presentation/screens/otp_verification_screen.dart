@@ -105,83 +105,97 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
               style: const TextStyle(color: AppTheme.textMuted),
             ),
             const SizedBox(height: 26),
-            GlassPanel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: List.generate(
-                      6,
-                      (index) => Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(right: index == 5 ? 0 : 8),
-                          child: KeyboardListener(
-                            focusNode: FocusNode(skipTraversal: true),
-                            onKeyEvent: (event) {
-                              if (event is KeyDownEvent &&
-                                  event.logicalKey ==
-                                      LogicalKeyboardKey.backspace &&
-                                  _controllers[index].text.isEmpty &&
-                                  index > 0) {
-                                _focusNodes[index - 1].requestFocus();
-                              }
-                            },
-                            child: TextField(
-                              controller: _controllers[index],
-                              focusNode: _focusNodes[index],
-                              textAlign: TextAlign.center,
-                              maxLength: 1,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [
-                                FilteringTextInputFormatter.digitsOnly,
-                              ],
-                              onChanged: (value) =>
-                                  _onDigitChanged(value, index),
-                              decoration: const InputDecoration(
-                                counterText: '',
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 480),
+                child: GlassPanel(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: List.generate(
+                          6,
+                          (index) => Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(
+                                right: index == 5 ? 0 : 8,
+                              ),
+                              child: KeyboardListener(
+                                focusNode: FocusNode(skipTraversal: true),
+                                onKeyEvent: (event) {
+                                  if (event is KeyDownEvent &&
+                                      event.logicalKey ==
+                                          LogicalKeyboardKey.backspace &&
+                                      _controllers[index].text.isEmpty &&
+                                      index > 0) {
+                                    _focusNodes[index - 1].requestFocus();
+                                  }
+                                },
+                                child: TextField(
+                                  controller: _controllers[index],
+                                  focusNode: _focusNodes[index],
+                                  textAlign: TextAlign.center,
+                                  maxLength: 1,
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [
+                                    FilteringTextInputFormatter.digitsOnly,
+                                  ],
+                                  onChanged: (value) =>
+                                      _onDigitChanged(value, index),
+                                  decoration: const InputDecoration(
+                                    counterText: '',
+                                  ),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 20,
+                                  ),
+                                ),
                               ),
                             ),
                           ),
                         ),
                       ),
-                    ),
+                      if (showError) ...[
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Enter the 6 digit code sent to your email.',
+                          style: TextStyle(color: AppTheme.danger),
+                        ),
+                      ],
+                      if (_serverError != null) ...[
+                        const SizedBox(height: 12),
+                        Text(
+                          _serverError!,
+                          style: const TextStyle(color: AppTheme.danger),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Code expires in 5 minutes',
+                        style: TextStyle(color: AppTheme.textMuted),
+                      ),
+                      TextButton(
+                        onPressed: () {},
+                        child: const Text('Resend code'),
+                      ),
+                      const SizedBox(height: 10),
+                      ElevatedButton.icon(
+                        onPressed: _isLoading ? null : _verify,
+                        icon: _isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.verified_outlined),
+                        label: Text(_isLoading ? 'Verifying' : 'Verify'),
+                      ),
+                    ],
                   ),
-                  if (showError) ...[
-                    const SizedBox(height: 12),
-                    const Text(
-                      'Enter the 6 digit code sent to your email.',
-                      style: TextStyle(color: AppTheme.danger),
-                    ),
-                  ],
-                  if (_serverError != null) ...[
-                    const SizedBox(height: 12),
-                    Text(
-                      _serverError!,
-                      style: const TextStyle(color: AppTheme.danger),
-                    ),
-                  ],
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Code expires in 5 minutes',
-                    style: TextStyle(color: AppTheme.textMuted),
-                  ),
-                  TextButton(
-                    onPressed: () {},
-                    child: const Text('Resend code'),
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _verify,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.verified_outlined),
-                    label: Text(_isLoading ? 'Verifying' : 'Verify'),
-                  ),
-                ],
+                ),
               ),
             ),
           ],

@@ -65,7 +65,7 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
               onRefresh: _refresh,
               child: ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
                 itemCount: users.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
@@ -73,11 +73,19 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
                   return GlassPanel(
                     padding: EdgeInsets.zero,
                     child: ListTile(
+                      minVerticalPadding: 14,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 4,
+                      ),
                       leading: UserAvatar(
                         initials: user.initials,
                         imageUrl: user.imageUrl,
                       ),
-                      title: Text(user.fullName),
+                      title: Text(
+                        user.fullName,
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
                       subtitle: Text(
                         '@${user.username}',
                         style: const TextStyle(color: AppTheme.textMuted),

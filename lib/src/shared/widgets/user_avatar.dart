@@ -18,15 +18,12 @@ class UserAvatar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: size,
-      height: size,
-      child: Stack(
-        children: [
-          CircleAvatar(
-            radius: size / 2,
-            backgroundColor: Colors.transparent,
-            child: Container(
+    return RepaintBoundary(
+      child: SizedBox.square(
+        dimension: size,
+        child: Stack(
+          children: [
+            Container(
               width: size,
               height: size,
               alignment: Alignment.center,
@@ -35,51 +32,74 @@ class UserAvatar extends StatelessWidget {
                 gradient: const LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF183A75), Color(0xFF132246)],
+                  colors: [Color(0xFF1D4F8F), Color(0xFF151B3B)],
                 ),
-                border: Border.all(color: AppTheme.cyan.withValues(alpha: .28)),
+                border: Border.all(color: AppTheme.cyan.withValues(alpha: .32)),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppTheme.cyan.withValues(alpha: .12),
+                    blurRadius: 14,
+                  ),
+                ],
               ),
-              child: imageUrl == null || imageUrl!.isEmpty
-                  ? Text(
-                      initials,
-                      style: TextStyle(
-                        color: AppTheme.cyan,
-                        fontSize: size * .32,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    )
-                  : ClipOval(
-                      child: Image.network(
+              child: ClipOval(
+                child: imageUrl == null || imageUrl!.isEmpty
+                    ? Center(
+                        child: _Initials(initials: initials, size: size),
+                      )
+                    : Image.network(
                         imageUrl!,
                         width: size,
                         height: size,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => Text(
-                          initials,
-                          style: TextStyle(
-                            color: AppTheme.cyan,
-                            fontSize: size * .32,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        errorBuilder: (_, _, _) => Center(
+                          child: _Initials(initials: initials, size: size),
                         ),
                       ),
-                    ),
-            ),
-          ),
-          Positioned(
-            right: 2,
-            bottom: 2,
-            child: Container(
-              width: size * .22,
-              height: size * .22,
-              decoration: BoxDecoration(
-                color: isOnline ? Colors.greenAccent : Colors.blueGrey,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppTheme.space, width: 2),
               ),
             ),
-          ),
-        ],
+            Positioned(
+              right: 1,
+              bottom: 1,
+              child: Container(
+                width: size * .23,
+                height: size * .23,
+                decoration: BoxDecoration(
+                  color: isOnline ? AppTheme.teal : Colors.blueGrey,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.space, width: 2),
+                  boxShadow: isOnline
+                      ? [
+                          BoxShadow(
+                            color: AppTheme.teal.withValues(alpha: .45),
+                            blurRadius: 8,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Initials extends StatelessWidget {
+  const _Initials({required this.initials, required this.size});
+
+  final String initials;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      initials,
+      style: TextStyle(
+        color: AppTheme.cyan,
+        fontSize: size * .32,
+        fontWeight: FontWeight.w900,
       ),
     );
   }

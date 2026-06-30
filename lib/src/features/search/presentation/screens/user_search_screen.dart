@@ -66,8 +66,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(18, 14, 18, 16),
               child: GlassPanel(
+                padding: const EdgeInsets.all(18),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -123,7 +124,7 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
                     return ListView.separated(
                       physics: const AlwaysScrollableScrollPhysics(),
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 110),
                       itemCount: users.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
                       itemBuilder: (context, index) {
@@ -131,6 +132,11 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
                         return GlassPanel(
                           padding: EdgeInsets.zero,
                           child: ListTile(
+                            minVerticalPadding: 14,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 4,
+                            ),
                             onTap: () => Navigator.of(context).pushNamed(
                               AppRouter.publicProfile,
                               arguments: user,

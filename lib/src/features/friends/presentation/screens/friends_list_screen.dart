@@ -88,6 +88,11 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
                   return GlassPanel(
                     padding: EdgeInsets.zero,
                     child: ListTile(
+                      minVerticalPadding: 14,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 4,
+                      ),
                       leading: UserAvatar(
                         initials: friend.initials,
                         imageUrl: friend.imageUrl,
@@ -101,52 +106,60 @@ class _FriendsListScreenState extends State<FriendsListScreen> {
                         friend.statusLabel,
                         style: const TextStyle(color: AppTheme.textMuted),
                       ),
-                      trailing: Wrap(
-                        spacing: 4,
-                        children: [
-                          IconButton(
-                            onPressed: () async {
-                              try {
-                                final conversation = await AppDependencies
-                                    .chatRepository
-                                    .startConversation(friend.id);
-                                if (!context.mounted) {
-                                  return;
+                      trailing: SizedBox(
+                        width: 96,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              tooltip: 'Message',
+                              onPressed: () async {
+                                try {
+                                  final conversation = await AppDependencies
+                                      .chatRepository
+                                      .startConversation(friend.id);
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  Navigator.of(context).pushNamed(
+                                    AppRouter.chat,
+                                    arguments: conversation,
+                                  );
+                                } catch (error) {
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(readableError(error)),
+                                    ),
+                                  );
                                 }
-                                Navigator.of(context).pushNamed(
-                                  AppRouter.chat,
-                                  arguments: conversation,
-                                );
-                              } catch (error) {
-                                if (!context.mounted) {
-                                  return;
+                              },
+                              icon: const Icon(Icons.message_outlined),
+                            ),
+                            IconButton(
+                              tooltip: 'Remove',
+                              onPressed: () async {
+                                try {
+                                  await AppDependencies.friendsRepository
+                                      .remove(friend.id);
+                                  await _refresh();
+                                } catch (error) {
+                                  if (!context.mounted) {
+                                    return;
+                                  }
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(readableError(error)),
+                                    ),
+                                  );
                                 }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(readableError(error))),
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.message_outlined),
-                          ),
-                          IconButton(
-                            onPressed: () async {
-                              try {
-                                await AppDependencies.friendsRepository.remove(
-                                  friend.id,
-                                );
-                                await _refresh();
-                              } catch (error) {
-                                if (!context.mounted) {
-                                  return;
-                                }
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text(readableError(error))),
-                                );
-                              }
-                            },
-                            icon: const Icon(Icons.person_remove_outlined),
-                          ),
-                        ],
+                              },
+                              icon: const Icon(Icons.person_remove_outlined),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   );

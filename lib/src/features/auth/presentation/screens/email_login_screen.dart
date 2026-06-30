@@ -85,48 +85,56 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
               style: TextStyle(color: AppTheme.textMuted, fontSize: 16),
             ),
             const SizedBox(height: 32),
-            GlassPanel(
-              child: Column(
-                children: [
-                  TextField(
-                    controller: _emailController,
-                    keyboardType: TextInputType.emailAddress,
-                    textInputAction: TextInputAction.done,
-                    onChanged: (_) {
-                      if (_submitted) {
-                        setState(() => _serverError = null);
-                      }
-                    },
-                    onSubmitted: (_) => _continue(),
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      hintText: 'noura@uranus.app',
-                      prefixIcon: const Icon(Icons.alternate_email),
-                      errorText: showError
-                          ? 'Please enter a valid email address.'
-                          : null,
-                    ),
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 460),
+                child: GlassPanel(
+                  padding: const EdgeInsets.all(18),
+                  child: Column(
+                    children: [
+                      TextField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.done,
+                        onChanged: (_) {
+                          if (_submitted) {
+                            setState(() => _serverError = null);
+                          }
+                        },
+                        onSubmitted: (_) => _continue(),
+                        decoration: InputDecoration(
+                          labelText: 'Email',
+                          hintText: 'noura@uranus.app',
+                          prefixIcon: const Icon(Icons.alternate_email),
+                          errorText: showError
+                              ? 'Please enter a valid email address.'
+                              : null,
+                        ),
+                      ),
+                      if (_serverError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          _serverError!,
+                          style: const TextStyle(color: AppTheme.danger),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      ElevatedButton.icon(
+                        onPressed: _isLoading ? null : _continue,
+                        icon: _isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.arrow_forward),
+                        label: Text(_isLoading ? 'Sending code' : 'Continue'),
+                      ),
+                    ],
                   ),
-                  if (_serverError != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      _serverError!,
-                      style: const TextStyle(color: AppTheme.danger),
-                    ),
-                  ],
-                  const SizedBox(height: 18),
-                  ElevatedButton.icon(
-                    onPressed: _isLoading ? null : _continue,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.arrow_forward),
-                    label: Text(_isLoading ? 'Sending code' : 'Continue'),
-                  ),
-                ],
+                ),
               ),
             ),
           ],

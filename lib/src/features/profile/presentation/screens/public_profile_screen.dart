@@ -80,7 +80,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
                 children: [
                   if (snapshot.hasError)
                     Padding(
@@ -97,6 +97,7 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                       ),
                     ),
                   GlassPanel(
+                    padding: const EdgeInsets.all(20),
                     child: Column(
                       children: [
                         UserAvatar(
@@ -124,6 +125,10 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
                   ),
                   const SizedBox(height: 14),
                   GlassPanel(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 16,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [

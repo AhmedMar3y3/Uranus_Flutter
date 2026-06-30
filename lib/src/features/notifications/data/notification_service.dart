@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../../app/router.dart';
 import '../../../core/network/api_client.dart';
@@ -26,9 +28,18 @@ class NotificationService {
 
   final ApiClient apiClient;
   final SessionManager sessionManager;
+  final FlutterLocalNotificationsPlugin _localNotifications =
+      FlutterLocalNotificationsPlugin();
 
   bool _initialized = false;
   bool _firebaseAvailable = false;
+
+  static const _messageChannel = AndroidNotificationChannel(
+    'uranus_messages',
+    'Messages',
+    description: 'New messages and friendship updates',
+    importance: Importance.high,
+  );
 
   Future<void> initialize() async {
     if (_initialized) {
@@ -48,8 +59,23 @@ class NotificationService {
       return;
     }
 
+    try {
+      await _initializeLocalNotifications();
+    } catch (_) {
+      // Push handling should continue even if local notifications fail.
+    }
     FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
-    await FirebaseMessaging.instance.requestPermission();
+    await FirebaseMessaging.instance.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+    await FirebaseMessaging.instance
+        .setForegroundNotificationPresentationOptions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
     FirebaseMessaging.onMessageOpenedApp.listen(_handleMessageTap);
@@ -121,6 +147,7 @@ class NotificationService {
   }
 
   void _handleForegroundMessage(RemoteMessage message) {
+    unawaited(_showForegroundNotification(message));
     final context = AppRouter.navigatorKey.currentContext;
     final title = message.notification?.title ?? 'Uranus';
     final body = message.notification?.body ?? 'New notification';
@@ -140,6 +167,71 @@ class NotificationService {
 
   void _handleMessageTap(RemoteMessage message) {
     AppRouter.openNotification(message.data);
+  }
+
+  Future<void> _initializeLocalNotifications() async {
+    const settings = InitializationSettings(
+      android: AndroidInitializationSettings('@mipmap/ic_launcher'),
+      iOS: DarwinInitializationSettings(),
+    );
+    await _localNotifications.initialize(
+      settings: settings,
+      onDidReceiveNotificationResponse: (response) {
+        final payload = response.payload;
+        if (payload == null || payload.isEmpty) {
+          return;
+        }
+        final decoded = jsonDecode(payload);
+        if (decoded is Map<String, dynamic>) {
+          AppRouter.openNotification(decoded);
+        }
+      },
+    );
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.createNotificationChannel(_messageChannel);
+    await _localNotifications
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
+        ?.requestNotificationsPermission();
+  }
+
+  Future<void> _showForegroundNotification(RemoteMessage message) async {
+    final data = message.data;
+    final title =
+        message.notification?.title ??
+        data['title']?.toString() ??
+        data['sender_name']?.toString() ??
+        'Uranus';
+    final body =
+        message.notification?.body ??
+        data['body']?.toString() ??
+        (data['type'] == 'message.sent' ? 'New message' : 'New notification');
+
+    try {
+      await _localNotifications.show(
+        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
+        title: title,
+        body: body,
+        notificationDetails: NotificationDetails(
+          android: AndroidNotificationDetails(
+            _messageChannel.id,
+            _messageChannel.name,
+            channelDescription: _messageChannel.description,
+            importance: Importance.high,
+            priority: Priority.high,
+            category: AndroidNotificationCategory.message,
+          ),
+          iOS: const DarwinNotificationDetails(),
+        ),
+        payload: jsonEncode(data),
+      );
+    } catch (_) {
+      return;
+    }
   }
 
   String get _platform {

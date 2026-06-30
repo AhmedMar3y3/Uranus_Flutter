@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
+import '../../../../shared/widgets/glass_panel.dart';
 import '../../domain/entities/message.dart';
 
 class ImageViewerScreen extends StatelessWidget {
@@ -12,7 +13,7 @@ class ImageViewerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(),
+      appBar: AppBar(backgroundColor: Colors.black.withValues(alpha: .6)),
       body: Stack(
         children: [
           const Center(
@@ -22,11 +23,14 @@ class ImageViewerScreen extends StatelessWidget {
             left: 16,
             right: 16,
             bottom: 24,
-            child: Text(
-              message == null
-                  ? 'Image message · 8:20 PM'
-                  : '${message!.senderId} · ${message!.sentAt}',
-              style: const TextStyle(color: Colors.white70),
+            child: GlassPanel(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Text(
+                message == null
+                    ? 'Image message - 8:20 PM'
+                    : '${message!.senderId} - ${message!.sentAt}',
+                style: const TextStyle(color: Colors.white70),
+              ),
             ),
           ),
         ],

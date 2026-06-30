@@ -12,6 +12,7 @@ import '../features/chat/presentation/screens/image_viewer_screen.dart';
 import '../features/friends/presentation/screens/blocked_users_screen.dart';
 import '../features/friends/presentation/screens/friend_requests_screen.dart';
 import '../features/profile/domain/entities/app_user.dart';
+import '../features/profile/presentation/screens/edit_profile_screen.dart';
 import '../features/profile/presentation/screens/public_profile_screen.dart';
 import '../features/shell/presentation/main_shell.dart';
 
@@ -25,6 +26,7 @@ class AppRouter {
   static const shell = '/home';
   static const chat = '/chat';
   static const publicProfile = '/profile/public';
+  static const editProfile = '/profile/edit';
   static const friendRequests = '/friends/requests';
   static const blockedUsers = '/friends/blocked';
   static const attachmentPreview = '/chat/attachment-preview';
@@ -43,6 +45,21 @@ class AppRouter {
             : ChatRoomScreen(conversation: settings.arguments as Conversation?),
       publicProfile => PublicProfileScreen(
         user: settings.arguments as AppUser?,
+      ),
+      editProfile => EditProfileScreen(
+        user: settings.arguments is AppUser
+            ? settings.arguments! as AppUser
+            : const AppUser(
+                id: '',
+                username: '',
+                fullName: '',
+                initials: 'U',
+                gender: Gender.female,
+                bio: '',
+                friendsCount: 0,
+                isOnline: false,
+                lastSeen: 'recently',
+              ),
       ),
       friendRequests => const FriendRequestsScreen(),
       blockedUsers => const BlockedUsersScreen(),

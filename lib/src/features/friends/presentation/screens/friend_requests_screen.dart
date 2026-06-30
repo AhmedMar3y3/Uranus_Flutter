@@ -79,7 +79,7 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 28),
                 children: [
                   _SectionTitle(
                     title: 'Received Requests',
@@ -90,21 +90,23 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
                     _RequestTile(
                       request: request,
                       actions: [
-                        TextButton(
+                        IconButton.filledTonal(
+                          tooltip: 'Accept',
                           onPressed: () => _runAction(
                             () => AppDependencies.friendsRepository.accept(
                               request.user.id,
                             ),
                           ),
-                          child: const Text('Accept'),
+                          icon: const Icon(Icons.check),
                         ),
-                        TextButton(
+                        IconButton(
+                          tooltip: 'Reject',
                           onPressed: () => _runAction(
                             () => AppDependencies.friendsRepository.reject(
                               request.user.id,
                             ),
                           ),
-                          child: const Text('Reject'),
+                          icon: const Icon(Icons.close),
                         ),
                       ],
                     ),
@@ -118,13 +120,14 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
                     _RequestTile(
                       request: request,
                       actions: [
-                        TextButton(
+                        IconButton(
+                          tooltip: 'Cancel',
                           onPressed: () => _runAction(
                             () => AppDependencies.friendsRepository.cancel(
                               request.user.id,
                             ),
                           ),
-                          child: const Text('Cancel'),
+                          icon: const Icon(Icons.undo),
                         ),
                       ],
                     ),
@@ -167,6 +170,11 @@ class _RequestTile extends StatelessWidget {
       child: GlassPanel(
         padding: EdgeInsets.zero,
         child: ListTile(
+          minVerticalPadding: 14,
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 4,
+          ),
           leading: UserAvatar(
             initials: user.initials,
             imageUrl: user.imageUrl,
@@ -180,7 +188,13 @@ class _RequestTile extends StatelessWidget {
             '@${user.username}',
             style: const TextStyle(color: AppTheme.textMuted),
           ),
-          trailing: Wrap(spacing: 6, children: actions),
+          trailing: SizedBox(
+            width: (actions.length * 48).toDouble(),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: actions,
+            ),
+          ),
         ),
       ),
     );

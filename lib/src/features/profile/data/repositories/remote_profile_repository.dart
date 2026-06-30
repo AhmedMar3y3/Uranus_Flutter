@@ -16,7 +16,9 @@ class RemoteProfileRepository implements ProfileRepository {
   @override
   Future<AppUser> getCurrentUser() async {
     final json = await apiClient.get('/profile/me');
-    return UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    final user = UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    await sessionManager.saveUserIdentity(id: user.id, username: user.username);
+    return user;
   }
 
   @override
@@ -55,7 +57,9 @@ class RemoteProfileRepository implements ProfileRepository {
       },
     );
     await sessionManager.markProfileCompleted();
-    return UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    final user = UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    await sessionManager.saveUserIdentity(id: user.id, username: user.username);
+    return user;
   }
 
   @override
@@ -85,6 +89,8 @@ class RemoteProfileRepository implements ProfileRepository {
       fields: fields,
       filePaths: imagePath == null ? null : {'image': imagePath},
     );
-    return UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    final user = UserMapper.fromJson(json['user'] as Map<String, dynamic>);
+    await sessionManager.saveUserIdentity(id: user.id, username: user.username);
+    return user;
   }
 }

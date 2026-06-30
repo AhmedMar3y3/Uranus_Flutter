@@ -1,29 +1,39 @@
+import 'package:file_picker/file_picker.dart' as picker;
 import 'package:flutter/material.dart';
 
 import '../../../../app/app_dependencies.dart';
-import '../../../../app/router.dart';
 import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../../../shared/widgets/app_logo.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
-import '../../../profile/domain/entities/app_user.dart';
+import '../../../../shared/widgets/user_avatar.dart';
+import '../../domain/entities/app_user.dart';
 
-class CompleteProfileScreen extends StatefulWidget {
-  const CompleteProfileScreen({super.key});
+class EditProfileScreen extends StatefulWidget {
+  const EditProfileScreen({required this.user, super.key});
+
+  final AppUser user;
 
   @override
-  State<CompleteProfileScreen> createState() => _CompleteProfileScreenState();
+  State<EditProfileScreen> createState() => _EditProfileScreenState();
 }
 
-class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
-  final _usernameController = TextEditingController();
-  final _fullNameController = TextEditingController();
-  final _bioController = TextEditingController();
-  String _gender = 'female';
-  bool _submitted = false;
-  bool _isLoading = false;
+class _EditProfileScreenState extends State<EditProfileScreen> {
+  late final _usernameController = TextEditingController(
+    text: widget.user.username,
+  );
+  late final _fullNameController = TextEditingController(
+    text: widget.user.fullName,
+  );
+  late final _bioController = TextEditingController(text: widget.user.bio);
+  late Gender _gender = widget.user.gender == Gender.other
+      ? Gender.female
+      : widget.user.gender;
+
+  String? _imagePath;
   String? _serverError;
+  bool _isSaving = false;
+  bool _submitted = false;
 
   bool get _usernameInvalid => _usernameController.text.trim().length < 3;
 
@@ -35,7 +45,19 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
     super.dispose();
   }
 
-  Future<void> _complete() async {
+  Future<void> _pickImage() async {
+    final result = await picker.FilePicker.pickFiles(
+      type: picker.FileType.image,
+      allowMultiple: false,
+    );
+    final path = result?.files.single.path;
+    if (path == null) {
+      return;
+    }
+    setState(() => _imagePath = path);
+  }
+
+  Future<void> _save() async {
     setState(() {
       _submitted = true;
       _serverError = null;
@@ -44,23 +66,26 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() => _isSaving = true);
     try {
-      await AppDependencies.profileRepository.completeProfile(
+      final updated = await AppDependencies.profileRepository.updateProfile(
         username: _usernameController.text.trim(),
         fullName: _fullNameController.text.trim(),
-        gender: _gender == 'male' ? Gender.male : Gender.female,
+        gender: _gender,
         bio: _bioController.text.trim(),
+        imagePath: _imagePath,
       );
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pushReplacementNamed(AppRouter.shell);
+      Navigator.of(context).pop(updated);
     } catch (error) {
-      setState(() => _serverError = readableError(error));
+      if (mounted) {
+        setState(() => _serverError = readableError(error));
+      }
     } finally {
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() => _isSaving = false);
       }
     }
   }
@@ -68,24 +93,38 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Complete profile')),
+      appBar: AppBar(title: const Text('Edit profile')),
       body: SpaceBackground(
         child: ListView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
           children: [
             Center(
               child: Stack(
                 alignment: Alignment.bottomRight,
                 children: [
-                  const AppLogo(size: 104),
+                  UserAvatar(
+                    initials: widget.user.initials,
+                    imageUrl: _imagePath == null ? widget.user.imageUrl : null,
+                    isOnline: widget.user.isOnline,
+                    size: 112,
+                  ),
                   IconButton.filled(
-                    onPressed: () {},
+                    tooltip: 'Change image',
+                    onPressed: _pickImage,
                     icon: const Icon(Icons.camera_alt_outlined),
                   ),
                 ],
               ),
             ),
-            const SizedBox(height: 24),
+            if (_imagePath != null) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'New image selected',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppTheme.cyan),
+              ),
+            ],
+            const SizedBox(height: 22),
             Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 520),
@@ -115,15 +154,15 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                       const SizedBox(height: 16),
                       SizedBox(
                         width: double.infinity,
-                        child: SegmentedButton<String>(
+                        child: SegmentedButton<Gender>(
                           segments: const [
                             ButtonSegment(
-                              value: 'female',
+                              value: Gender.female,
                               label: Text('Female'),
                               icon: Icon(Icons.female),
                             ),
                             ButtonSegment(
-                              value: 'male',
+                              value: Gender.male,
                               label: Text('Male'),
                               icon: Icon(Icons.male),
                             ),
@@ -138,10 +177,9 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                       TextField(
                         controller: _bioController,
                         minLines: 3,
-                        maxLines: 4,
+                        maxLines: 5,
                         decoration: const InputDecoration(
                           labelText: 'Bio',
-                          hintText: 'Optional',
                           prefixIcon: Icon(Icons.notes_outlined),
                         ),
                       ),
@@ -152,10 +190,10 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                           style: const TextStyle(color: AppTheme.danger),
                         ),
                       ],
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 22),
                       ElevatedButton.icon(
-                        onPressed: _isLoading ? null : _complete,
-                        icon: _isLoading
+                        onPressed: _isSaving ? null : _save,
+                        icon: _isSaving
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
@@ -163,8 +201,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                                   strokeWidth: 2,
                                 ),
                               )
-                            : const Icon(Icons.check_circle_outline),
-                        label: Text(_isLoading ? 'Saving' : 'Complete profile'),
+                            : const Icon(Icons.save_outlined),
+                        label: Text(_isSaving ? 'Saving' : 'Save changes'),
                       ),
                     ],
                   ),

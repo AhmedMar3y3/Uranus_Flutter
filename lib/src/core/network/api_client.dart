@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -86,8 +87,10 @@ class ApiClient {
       }
     }
 
-    final response = await request.send();
-    final text = await response.stream.bytesToString();
+    final response = await request.send().timeout(ApiConfig.requestTimeout);
+    final text = await response.stream.bytesToString().timeout(
+      ApiConfig.requestTimeout,
+    );
     return _parseResponse(response.statusCode, text);
   }
 
@@ -120,10 +123,12 @@ class ApiClient {
     Future<http.Response> Function() request,
   ) async {
     try {
-      final response = await request();
+      final response = await request().timeout(ApiConfig.requestTimeout);
       return _parseResponse(response.statusCode, response.body);
     } on ApiException {
       rethrow;
+    } on TimeoutException {
+      throw const ApiException('Request timed out. Please try again.');
     } catch (_) {
       throw const ApiException('Network error. Please check your connection.');
     }

@@ -7,12 +7,14 @@ class GlassPanel extends StatelessWidget {
     required this.child,
     this.padding = const EdgeInsets.all(16),
     this.margin,
+    this.gradient,
     super.key,
   });
 
   final Widget child;
   final EdgeInsetsGeometry padding;
   final EdgeInsetsGeometry? margin;
+  final Gradient? gradient;
 
   @override
   Widget build(BuildContext context) {
@@ -21,14 +23,28 @@ class GlassPanel extends StatelessWidget {
         margin: margin,
         padding: padding,
         decoration: BoxDecoration(
-          color: AppTheme.surface.withValues(alpha: .92),
+          gradient:
+              gradient ??
+              LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  AppTheme.surfaceGlow.withValues(alpha: .72),
+                  AppTheme.surface.withValues(alpha: .94),
+                ],
+              ),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.white.withValues(alpha: .08)),
+          border: Border.all(color: Colors.white.withValues(alpha: .1)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: .18),
-              blurRadius: 12,
-              offset: const Offset(0, 6),
+              color: Colors.black.withValues(alpha: .24),
+              blurRadius: 18,
+              offset: const Offset(0, 10),
+            ),
+            BoxShadow(
+              color: AppTheme.cyan.withValues(alpha: .04),
+              blurRadius: 22,
+              spreadRadius: 1,
             ),
           ],
         ),

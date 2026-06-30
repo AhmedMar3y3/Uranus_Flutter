@@ -1,6 +1,6 @@
 enum MessageKind { text, image, file, audio }
 
-enum MessageDelivery { sending, delivered, seen, failed }
+enum MessageDelivery { sending, sent, delivered, seen, failed }
 
 class MessageAttachment {
   const MessageAttachment({
@@ -44,4 +44,32 @@ class Message {
   final MessageAttachment? attachment;
   final Message? replyTo;
   final bool isEdited;
+
+  Message copyWith({
+    String? id,
+    String? senderId,
+    String? conversationId,
+    String? body,
+    String? sentAt,
+    bool? isMine,
+    MessageKind? kind,
+    MessageDelivery? delivery,
+    MessageAttachment? attachment,
+    Message? replyTo,
+    bool? isEdited,
+  }) {
+    return Message(
+      id: id ?? this.id,
+      senderId: senderId ?? this.senderId,
+      conversationId: conversationId ?? this.conversationId,
+      body: body ?? this.body,
+      sentAt: sentAt ?? this.sentAt,
+      isMine: isMine ?? this.isMine,
+      kind: kind ?? this.kind,
+      delivery: delivery ?? this.delivery,
+      attachment: attachment ?? this.attachment,
+      replyTo: replyTo ?? this.replyTo,
+      isEdited: isEdited ?? this.isEdited,
+    );
+  }
 }

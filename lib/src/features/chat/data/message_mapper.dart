@@ -33,7 +33,7 @@ class MessageMapper {
           ? MessageDelivery.seen
           : delivered
           ? MessageDelivery.delivered
-          : MessageDelivery.sending,
+          : MessageDelivery.sent,
       attachment: _attachment(json['attachment'], json['type']?.toString()),
       replyTo: json['reply_to'] is Map<String, dynamic>
           ? fromJson(

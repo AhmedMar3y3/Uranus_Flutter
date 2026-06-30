@@ -17,8 +17,8 @@ class SpaceBackground extends StatelessWidget {
           colors: [
             Color(0xFF02040D),
             AppTheme.space,
-            AppTheme.deepNavy,
-            Color(0xFF102A4E),
+            Color(0xFF071635),
+            Color(0xFF0D2844),
           ],
         ),
       ),
@@ -44,6 +44,10 @@ class _SpacePainter extends CustomPainter {
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.2
       ..color = AppTheme.violet.withValues(alpha: .12);
+    final gridPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = .45
+      ..color = AppTheme.cyan.withValues(alpha: .045);
 
     final stars = <Offset>[
       Offset(size.width * .12, size.height * .08),
@@ -60,6 +64,13 @@ class _SpacePainter extends CustomPainter {
 
     for (final star in stars) {
       canvas.drawCircle(star, 1.4, starPaint);
+    }
+
+    for (double x = 0; x < size.width; x += 48) {
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
+    }
+    for (double y = 0; y < size.height; y += 48) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
     canvas.drawArc(

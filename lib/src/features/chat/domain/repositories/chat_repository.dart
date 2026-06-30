@@ -17,9 +17,26 @@ abstract interface class ChatRepository {
     String? replyToMessageId,
     int? durationSeconds,
   });
+  Future<Message> editMessage({
+    required String conversationId,
+    required String messageId,
+    required String body,
+  });
+  Future<void> deleteMessage({
+    required String conversationId,
+    required String messageId,
+  });
   Future<Conversation> startConversation(String userId);
   Future<void> sendTyping({
     required String conversationId,
     required bool isTyping,
+  });
+  Future<Message> markMessageDelivered({
+    required String conversationId,
+    required String messageId,
+  });
+  Future<Message> markMessageSeen({
+    required String conversationId,
+    required String messageId,
   });
 }

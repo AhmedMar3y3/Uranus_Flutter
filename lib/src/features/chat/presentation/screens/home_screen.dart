@@ -78,7 +78,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
                       child: _HomeHeader(
                         filter: _filter,
                         online: online,
@@ -113,12 +113,13 @@ class _HomeScreenState extends State<HomeScreen> {
                     )
                   else
                     SliverPadding(
-                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 110),
                       sliver: SliverList.separated(
                         itemCount: conversations.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 10),
                         itemBuilder: (context, index) => _ConversationTile(
                           conversation: conversations[index],
+                          onChanged: _refresh,
                         ),
                       ),
                     ),
@@ -149,9 +150,15 @@ class _HomeHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         GlassPanel(
+          padding: const EdgeInsets.all(18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              const Text(
+                'Command deck',
+                style: TextStyle(color: AppTheme.cyan, fontSize: 12),
+              ),
+              const SizedBox(height: 6),
               Text(
                 'Signal room',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
@@ -167,53 +174,70 @@ class _HomeHeader extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          children: [
-            for (final item in ['All', 'Unread', 'Online'])
-              ChoiceChip(
-                label: Text(item),
-                selected: filter == item,
-                onSelected: (_) => onFilterChanged(item),
-              ),
-          ],
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<String>(
+            segments: const [
+              ButtonSegment(value: 'All', label: Text('All')),
+              ButtonSegment(value: 'Unread', label: Text('Unread')),
+              ButtonSegment(value: 'Online', label: Text('Online')),
+            ],
+            selected: {filter},
+            onSelectionChanged: (selection) => onFilterChanged(selection.first),
+          ),
         ),
         const SizedBox(height: 18),
         SizedBox(
           height: 94,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            itemCount: online.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 12),
-            itemBuilder: (context, index) {
-              final friend = online[index].friend;
-              return GlassPanel(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: SizedBox(
-                  width: 66,
-                  child: Column(
+          child: online.isEmpty
+              ? const GlassPanel(
+                  padding: EdgeInsets.all(14),
+                  child: Row(
                     children: [
-                      UserAvatar(
-                        initials: friend.initials,
-                        imageUrl: friend.imageUrl,
-                        isOnline: true,
-                        size: 48,
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        friend.username,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12),
+                      Icon(Icons.radar_outlined, color: AppTheme.cyan),
+                      SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'No friends are online right now.',
+                          style: TextStyle(color: AppTheme.textMuted),
+                        ),
                       ),
                     ],
                   ),
+                )
+              : ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: online.length,
+                  separatorBuilder: (_, _) => const SizedBox(width: 12),
+                  itemBuilder: (context, index) {
+                    final friend = online[index].friend;
+                    return GlassPanel(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: SizedBox(
+                        width: 68,
+                        child: Column(
+                          children: [
+                            UserAvatar(
+                              initials: friend.initials,
+                              imageUrl: friend.imageUrl,
+                              isOnline: true,
+                              size: 48,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              friend.username,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
                 ),
-              );
-            },
-          ),
         ),
       ],
     );
@@ -221,9 +245,13 @@ class _HomeHeader extends StatelessWidget {
 }
 
 class _ConversationTile extends StatelessWidget {
-  const _ConversationTile({required this.conversation});
+  const _ConversationTile({
+    required this.conversation,
+    required this.onChanged,
+  });
 
   final Conversation conversation;
+  final Future<void> Function() onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -233,9 +261,14 @@ class _ConversationTile extends StatelessWidget {
     return GlassPanel(
       padding: EdgeInsets.zero,
       child: ListTile(
-        onTap: () => Navigator.of(
-          context,
-        ).pushNamed(AppRouter.chat, arguments: conversation),
+        minVerticalPadding: 14,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+        onTap: () async {
+          await Navigator.of(
+            context,
+          ).pushNamed(AppRouter.chat, arguments: conversation);
+          await onChanged();
+        },
         leading: UserAvatar(
           initials: friend.initials,
           imageUrl: friend.imageUrl,
@@ -261,9 +294,15 @@ class _ConversationTile extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(
-              conversation.latestTimestamp,
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+            SizedBox(
+              width: 70,
+              child: Text(
+                conversation.latestTimestamp,
+                textAlign: TextAlign.end,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              ),
             ),
             if (conversation.unreadCount > 0) ...[
               const SizedBox(height: 6),

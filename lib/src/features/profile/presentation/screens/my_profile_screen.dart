@@ -35,9 +35,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   Future<void> _logout(BuildContext context) async {
     try {
       await AppDependencies.notificationService.deleteTokenIfAuthenticated();
-    } catch (_) {
-      // Logout should still clear the local session if token cleanup fails.
-    }
+    } catch (_) {}
     await AppDependencies.sessionManager.clear();
     if (!context.mounted) {
       return;
@@ -45,6 +43,19 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(AppRouter.login, (route) => false);
+  }
+
+  Future<void> _editProfile(AppUser user) async {
+    final result = await Navigator.of(
+      context,
+    ).pushNamed(AppRouter.editProfile, arguments: user);
+    if (result is AppUser) {
+      setState(() {
+        _future = Future.value(result);
+      });
+    } else {
+      await _refresh();
+    }
   }
 
   @override
@@ -72,48 +83,135 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
               onRefresh: _refresh,
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.fromLTRB(18, 18, 18, 110),
                 children: [
                   GlassPanel(
+                    padding: EdgeInsets.zero,
                     child: Column(
                       children: [
-                        UserAvatar(
-                          initials: user.initials,
-                          imageUrl: user.imageUrl,
-                          isOnline: user.isOnline,
-                          size: 104,
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                AppTheme.cyan.withValues(alpha: .18),
+                                AppTheme.violet.withValues(alpha: .12),
+                                AppTheme.surface.withValues(alpha: .28),
+                              ],
+                            ),
+                          ),
+                          child: Column(
+                            children: [
+                              UserAvatar(
+                                initials: user.initials,
+                                imageUrl: user.imageUrl,
+                                isOnline: user.isOnline,
+                                size: 112,
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                user.fullName,
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.headlineSmall
+                                    ?.copyWith(fontWeight: FontWeight.w900),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '@${user.username}',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppTheme.cyan,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 14),
+                              Text(
+                                user.bio.isEmpty ? 'No bio yet.' : user.bio,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: AppTheme.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                        const SizedBox(height: 18),
-                        Text(
-                          user.fullName,
-                          textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.headlineSmall
-                              ?.copyWith(fontWeight: FontWeight.w800),
-                        ),
-                        Text(
-                          '@${user.username}',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppTheme.cyan),
-                        ),
-                        const SizedBox(height: 18),
-                        Text(
-                          user.bio.isEmpty ? 'No bio yet.' : user.bio,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(color: AppTheme.textMuted),
+                        Padding(
+                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 18),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: () => _editProfile(user),
+                                  icon: const Icon(Icons.edit_outlined),
+                                  label: const Text('Edit profile'),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              IconButton.filledTonal(
+                                tooltip: 'Blocked users',
+                                onPressed: () => Navigator.of(
+                                  context,
+                                ).pushNamed(AppRouter.blockedUsers),
+                                icon: const Icon(Icons.block),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 14),
-                  GlassPanel(
-                    child: Column(
-                      children: [
-                        _InfoRow(label: 'Gender', value: user.gender.name),
-                        _InfoRow(
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _MetricCard(
                           label: 'Friends',
                           value: '${user.friendsCount}',
                         ),
-                        _InfoRow(label: 'Presence', value: user.statusLabel),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: _MetricCard(
+                          label: 'Gender',
+                          value: user.gender.name,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  GlassPanel(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(
+                          user.isOnline
+                              ? Icons.radio_button_checked
+                              : Icons.timelapse,
+                          color: user.isOnline ? AppTheme.teal : AppTheme.cyan,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Presence',
+                                style: TextStyle(color: AppTheme.textMuted),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                user.statusLabel,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
@@ -133,26 +231,29 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
   }
 }
 
-class _InfoRow extends StatelessWidget {
-  const _InfoRow({required this.label, required this.value});
+class _MetricCard extends StatelessWidget {
+  const _MetricCard({required this.label, required this.value});
 
   final String label;
   final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: Row(
+    return GlassPanel(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: AppTheme.textMuted)),
-          const Spacer(),
-          Flexible(
-            child: Text(
-              value,
-              textAlign: TextAlign.end,
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
           ),
         ],
       ),
