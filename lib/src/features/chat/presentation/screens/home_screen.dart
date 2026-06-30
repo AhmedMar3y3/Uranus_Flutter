@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_logo.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/state_placeholder.dart';
 import '../../../../shared/widgets/user_avatar.dart';
-import '../../data/mock_conversations.dart';
 import '../../domain/entities/conversation.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -19,143 +20,202 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _filter = 'All';
+  late Future<List<Conversation>> _future = _loadConversations();
+
+  Future<List<Conversation>> _loadConversations() {
+    return AppDependencies.chatRepository.getConversations();
+  }
+
+  Future<void> _refresh() async {
+    final next = _loadConversations();
+    setState(() => _future = next);
+    try {
+      await next;
+    } catch (_) {
+      // FutureBuilder renders the error state; refresh should still finish.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final conversations = MockConversations.conversations.where((item) {
-      return switch (_filter) {
-        'Unread' => item.unreadCount > 0,
-        'Online' => item.friend.isOnline,
-        _ => true,
-      };
-    }).toList();
-    final online = MockConversations.conversations
-        .where((item) => item.friend.isOnline)
-        .toList();
-
     return Scaffold(
       body: SpaceBackground(
-        child: CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              pinned: true,
-              title: const Text('Uranus'),
-              leading: const Padding(
-                padding: EdgeInsets.all(8),
-                child: AppLogo(showGlow: false),
-              ),
-              actions: [
-                IconButton(
-                  onPressed: () =>
-                      Navigator.of(context).pushNamed(AppRouter.friendRequests),
-                  icon: const Icon(Icons.person_add_alt),
-                ),
-              ],
-            ),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    GlassPanel(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Signal room',
-                            style: Theme.of(context).textTheme.headlineSmall
-                                ?.copyWith(fontWeight: FontWeight.w900),
-                          ),
-                          const SizedBox(height: 6),
-                          const Text(
-                            'Live friends, quiet chats, and unread messages in one orbit.',
-                            style: TextStyle(color: AppTheme.textMuted),
-                          ),
-                          const SizedBox(height: 16),
-                          const TextField(
-                            decoration: InputDecoration(
-                              hintText: 'Search conversations',
-                              prefixIcon: Icon(Icons.search),
-                            ),
-                          ),
-                        ],
+        child: FutureBuilder<List<Conversation>>(
+          future: _future,
+          builder: (context, snapshot) {
+            final allConversations = snapshot.data ?? const <Conversation>[];
+            final conversations = allConversations.where((item) {
+              return switch (_filter) {
+                'Unread' => item.unreadCount > 0,
+                'Online' => item.friend.isOnline,
+                _ => true,
+              };
+            }).toList();
+            final online = allConversations
+                .where((item) => item.friend.isOnline)
+                .toList();
+
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: CustomScrollView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                slivers: [
+                  SliverAppBar(
+                    pinned: true,
+                    title: const Text('Uranus'),
+                    leading: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: AppLogo(size: 40, showGlow: false),
+                    ),
+                    actions: [
+                      IconButton(
+                        onPressed: () => Navigator.of(
+                          context,
+                        ).pushNamed(AppRouter.friendRequests),
+                        icon: const Icon(Icons.person_add_alt),
+                      ),
+                    ],
+                  ),
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                      child: _HomeHeader(
+                        filter: _filter,
+                        online: online,
+                        onFilterChanged: (filter) =>
+                            setState(() => _filter = filter),
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      children: [
-                        for (final filter in ['All', 'Unread', 'Online'])
-                          ChoiceChip(
-                            label: Text(filter),
-                            selected: _filter == filter,
-                            onSelected: (_) => setState(() => _filter = filter),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    SizedBox(
-                      height: 94,
-                      child: ListView.separated(
-                        scrollDirection: Axis.horizontal,
-                        itemCount: online.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 12),
-                        itemBuilder: (context, index) {
-                          final friend = online[index].friend;
-                          return GlassPanel(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 12,
-                              vertical: 10,
-                            ),
-                            child: SizedBox(
-                              width: 66,
-                              child: Column(
-                                children: [
-                                  UserAvatar(
-                                    initials: friend.initials,
-                                    isOnline: true,
-                                    size: 48,
-                                  ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    friend.username,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        },
+                  ),
+                  if (snapshot.connectionState == ConnectionState.waiting)
+                    const SliverFillRemaining(
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (snapshot.hasError)
+                    SliverFillRemaining(
+                      child: StatePlaceholder(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Could not load conversations',
+                        body: readableError(
+                          snapshot.error,
+                          fallback: 'Pull down to refresh or login again.',
+                        ),
+                      ),
+                    )
+                  else if (conversations.isEmpty)
+                    const SliverFillRemaining(
+                      child: StatePlaceholder(
+                        icon: Icons.forum_outlined,
+                        title: 'No conversations yet',
+                        body:
+                            'When friends message you, their latest chats appear here.',
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
+                      sliver: SliverList.separated(
+                        itemCount: conversations.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (context, index) => _ConversationTile(
+                          conversation: conversations[index],
+                        ),
                       ),
                     ),
-                  ],
+                ],
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader({
+    required this.filter,
+    required this.online,
+    required this.onFilterChanged,
+  });
+
+  final String filter;
+  final List<Conversation> online;
+  final ValueChanged<String> onFilterChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        GlassPanel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Signal room',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
                 ),
               ),
-            ),
-            if (conversations.isEmpty)
-              const SliverFillRemaining(
-                child: StatePlaceholder(
-                  icon: Icons.forum_outlined,
-                  title: 'No conversations yet',
-                  body:
-                      'When friends message you, their latest chats appear here.',
-                ),
-              )
-            else
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
-                sliver: SliverList.separated(
-                  itemCount: conversations.length,
-                  separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) =>
-                      _ConversationTile(conversation: conversations[index]),
-                ),
+              const SizedBox(height: 6),
+              const Text(
+                'Live friends, quiet chats, and unread messages in one orbit.',
+                style: TextStyle(color: AppTheme.textMuted),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          children: [
+            for (final item in ['All', 'Unread', 'Online'])
+              ChoiceChip(
+                label: Text(item),
+                selected: filter == item,
+                onSelected: (_) => onFilterChanged(item),
               ),
           ],
         ),
-      ),
+        const SizedBox(height: 18),
+        SizedBox(
+          height: 94,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: online.length,
+            separatorBuilder: (_, _) => const SizedBox(width: 12),
+            itemBuilder: (context, index) {
+              final friend = online[index].friend;
+              return GlassPanel(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: SizedBox(
+                  width: 66,
+                  child: Column(
+                    children: [
+                      UserAvatar(
+                        initials: friend.initials,
+                        imageUrl: friend.imageUrl,
+                        isOnline: true,
+                        size: 48,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        friend.username,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 }
@@ -178,6 +238,7 @@ class _ConversationTile extends StatelessWidget {
         ).pushNamed(AppRouter.chat, arguments: conversation),
         leading: UserAvatar(
           initials: friend.initials,
+          imageUrl: friend.imageUrl,
           isOnline: friend.isOnline,
         ),
         title: Text(

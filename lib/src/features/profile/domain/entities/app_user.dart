@@ -1,6 +1,6 @@
-enum Gender { female, male, preferNotToSay }
+enum Gender { female, male, other }
 
-enum FriendshipStatus { none, requestSent, requestReceived, friends, blocked }
+enum FriendshipStatus { none, pending, friends, rejected, blocked }
 
 class AppUser {
   const AppUser({
@@ -13,6 +13,7 @@ class AppUser {
     required this.friendsCount,
     required this.isOnline,
     required this.lastSeen,
+    this.imageUrl,
     this.mutualFriendsCount = 0,
     this.friendshipStatus = FriendshipStatus.none,
     this.completedProfile = true,
@@ -28,6 +29,7 @@ class AppUser {
   final int mutualFriendsCount;
   final bool isOnline;
   final String lastSeen;
+  final String? imageUrl;
   final FriendshipStatus friendshipStatus;
   final bool completedProfile;
 

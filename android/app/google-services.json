@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "529789889010",
+    "project_id": "uranus-56ec0",
+    "storage_bucket": "uranus-56ec0.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:529789889010:android:c0236a76bb84cdbacca36b",
+        "android_client_info": {
+          "package_name": "com.example.uranus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJNzGBOV52NNNv--9qp0I5APByC5i48vQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

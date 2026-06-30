@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_logo.dart';
@@ -20,9 +21,26 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
-    _redirectTimer = Timer(const Duration(milliseconds: 800), () {
+    _redirectTimer = Timer(const Duration(milliseconds: 500), () async {
       if (mounted) {
-        Navigator.of(context).pushReplacementNamed(AppRouter.login);
+        final hasToken = await AppDependencies.sessionManager.hasToken;
+        final completedProfile =
+            await AppDependencies.sessionManager.completedProfile;
+        if (hasToken) {
+          unawaited(
+            AppDependencies.notificationService.registerTokenIfAuthenticated(),
+          );
+        }
+        if (!mounted) {
+          return;
+        }
+        Navigator.of(context).pushReplacementNamed(
+          hasToken
+              ? completedProfile
+                    ? AppRouter.shell
+                    : AppRouter.completeProfile
+              : AppRouter.login,
+        );
       }
     });
   }

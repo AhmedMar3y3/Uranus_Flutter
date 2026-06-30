@@ -1,23 +1,39 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
+import '../../../../shared/widgets/refreshable_placeholder.dart';
 import '../../../../shared/widgets/space_background.dart';
-import '../../../../shared/widgets/state_placeholder.dart';
 import '../../../../shared/widgets/user_avatar.dart';
-import '../../../profile/data/mock_users.dart';
 import '../../../profile/domain/entities/app_user.dart';
 
-class FriendsListScreen extends StatelessWidget {
+class FriendsListScreen extends StatefulWidget {
   const FriendsListScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final friends = MockUsers.users
-        .where((user) => user.friendshipStatus == FriendshipStatus.friends)
-        .toList();
+  State<FriendsListScreen> createState() => _FriendsListScreenState();
+}
 
+class _FriendsListScreenState extends State<FriendsListScreen> {
+  late Future<List<AppUser>> _future = _loadFriends();
+
+  Future<List<AppUser>> _loadFriends() {
+    return AppDependencies.friendsRepository.getFriends();
+  }
+
+  Future<void> _refresh() async {
+    final next = _loadFriends();
+    setState(() => _future = next);
+    try {
+      await next;
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Friends'),
@@ -30,15 +46,41 @@ class FriendsListScreen extends StatelessWidget {
         ],
       ),
       body: SpaceBackground(
-        child: friends.isEmpty
-            ? const StatePlaceholder(
+        child: FutureBuilder<List<AppUser>>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return RefreshablePlaceholder(
+                icon: Icons.cloud_off_outlined,
+                title: 'Could not load friends',
+                body: readableError(
+                  snapshot.error,
+                  fallback:
+                      'Pull down to refresh after checking your connection.',
+                ),
+                onRefresh: _refresh,
+              );
+            }
+
+            final friends = snapshot.data ?? const <AppUser>[];
+            if (friends.isEmpty) {
+              return RefreshablePlaceholder(
                 icon: Icons.group_outlined,
                 title: 'No friends yet',
                 body:
                     'Accepted friends will show here with message and remove actions.',
-              )
-            : ListView.separated(
+                onRefresh: _refresh,
+              );
+            }
+
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView.separated(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 104),
+                physics: const AlwaysScrollableScrollPhysics(),
                 itemCount: friends.length,
                 separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
@@ -48,6 +90,7 @@ class FriendsListScreen extends StatelessWidget {
                     child: ListTile(
                       leading: UserAvatar(
                         initials: friend.initials,
+                        imageUrl: friend.imageUrl,
                         isOnline: friend.isOnline,
                       ),
                       title: Text(
@@ -62,11 +105,45 @@ class FriendsListScreen extends StatelessWidget {
                         spacing: 4,
                         children: [
                           IconButton(
-                            onPressed: () {},
+                            onPressed: () async {
+                              try {
+                                final conversation = await AppDependencies
+                                    .chatRepository
+                                    .startConversation(friend.id);
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                Navigator.of(context).pushNamed(
+                                  AppRouter.chat,
+                                  arguments: conversation,
+                                );
+                              } catch (error) {
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(readableError(error))),
+                                );
+                              }
+                            },
                             icon: const Icon(Icons.message_outlined),
                           ),
                           IconButton(
-                            onPressed: () {},
+                            onPressed: () async {
+                              try {
+                                await AppDependencies.friendsRepository.remove(
+                                  friend.id,
+                                );
+                                await _refresh();
+                              } catch (error) {
+                                if (!context.mounted) {
+                                  return;
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text(readableError(error))),
+                                );
+                              }
+                            },
                             icon: const Icon(Icons.person_remove_outlined),
                           ),
                         ],
@@ -75,6 +152,9 @@ class FriendsListScreen extends StatelessWidget {
                   );
                 },
               ),
+            );
+          },
+        ),
       ),
     );
   }

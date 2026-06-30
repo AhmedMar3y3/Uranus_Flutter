@@ -1,17 +1,51 @@
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart' as picker;
 
+import '../../../../app/app_dependencies.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
+import '../../../../shared/widgets/refreshable_placeholder.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/user_avatar.dart';
-import '../../data/mock_conversations.dart';
 import '../../domain/entities/conversation.dart';
 import '../../domain/entities/message.dart';
 import 'message_actions_sheet.dart';
+import '../../../profile/domain/entities/app_user.dart';
 
 class ChatRoomScreen extends StatefulWidget {
-  ChatRoomScreen({Conversation? conversation, super.key})
-    : conversation = conversation ?? MockConversations.conversations.first;
+  const ChatRoomScreen({Conversation? conversation, super.key})
+    : conversation = conversation ?? _emptyConversation;
+
+  factory ChatRoomScreen.fromConversationId(String conversationId) {
+    return ChatRoomScreen(
+      conversation: Conversation(
+        id: conversationId,
+        friend: _unknownUser,
+        unreadCount: 0,
+        latestTimestamp: '',
+      ),
+    );
+  }
+
+  static const _unknownUser = AppUser(
+    id: '',
+    username: 'unknown',
+    fullName: 'Unknown user',
+    initials: 'UU',
+    gender: Gender.other,
+    bio: '',
+    friendsCount: 0,
+    isOnline: false,
+    lastSeen: 'recently',
+  );
+
+  static const _emptyConversation = Conversation(
+    id: '',
+    friend: _unknownUser,
+    unreadCount: 0,
+    latestTimestamp: '',
+  );
 
   final Conversation conversation;
 
@@ -22,14 +56,60 @@ class ChatRoomScreen extends StatefulWidget {
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
-  late final List<Message> _messages = [...widget.conversation.messages];
-  bool _isRecording = false;
+  final _messages = <Message>[];
+  bool _isLoading = true;
+  bool _isSending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMessages();
+  }
 
   @override
   void dispose() {
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadMessages() async {
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final messages = await AppDependencies.chatRepository.getMessages(
+        widget.conversation.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(messages);
+        _isLoading = false;
+      });
+      _scrollToLatest();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _messages
+          ..clear()
+          ..addAll(widget.conversation.messages);
+        _isLoading = false;
+        _error = readableError(
+          error,
+          fallback:
+              'Could not load messages. Showing available conversation data.',
+        );
+      });
+    }
   }
 
   void _scrollToLatest() {
@@ -39,111 +119,171 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       }
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 260),
+        duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
       );
     });
   }
 
-  String _timeLabel() {
-    final now = TimeOfDay.now();
-    return now.format(context);
-  }
+  String _timeLabel() => TimeOfDay.now().format(context);
 
-  void _sendText() {
-    final body = _messageController.text.trim();
-    if (body.isEmpty) {
+  Future<void> _sendPickedAttachment(MessageKind type) async {
+    final result = await picker.FilePicker.pickFiles(
+      type: switch (type) {
+        MessageKind.image => picker.FileType.image,
+        MessageKind.audio => picker.FileType.audio,
+        _ => picker.FileType.any,
+      },
+      allowMultiple: false,
+    );
+    final file = result?.files.single;
+    final path = file?.path;
+    if (path == null) {
       return;
     }
-    _messageController.clear();
-    final messageId = 'local-${DateTime.now().millisecondsSinceEpoch}';
-    _appendMessage(
-      Message(
-        id: messageId,
-        senderId: 'u-0',
-        body: body,
-        sentAt: _timeLabel(),
-        isMine: true,
-        delivery: MessageDelivery.sending,
+
+    final localId = 'local-${DateTime.now().millisecondsSinceEpoch}';
+    final pending = Message(
+      id: localId,
+      conversationId: widget.conversation.id,
+      senderId: 'me',
+      body: '',
+      sentAt: _timeLabel(),
+      isMine: true,
+      kind: type,
+      delivery: MessageDelivery.sending,
+      attachment: MessageAttachment(
+        name: file!.name,
+        type: type,
+        sizeLabel: file.size < 1024 * 1024
+            ? '${(file.size / 1024).toStringAsFixed(0)} KB'
+            : '${(file.size / (1024 * 1024)).toStringAsFixed(1)} MB',
       ),
     );
-    Future<void>.delayed(const Duration(milliseconds: 500), () {
+
+    setState(() {
+      _isSending = true;
+      _messages.add(pending);
+    });
+    _scrollToLatest();
+
+    try {
+      final sent = await AppDependencies.chatRepository.sendAttachmentMessage(
+        conversationId: widget.conversation.id,
+        type: type,
+        filePath: path,
+        durationSeconds: type == MessageKind.audio ? 0 : null,
+      );
       if (!mounted) {
         return;
       }
-      final index = _messages.indexWhere((message) => message.id == messageId);
-      if (index == -1) {
+      final index = _messages.indexWhere((message) => message.id == localId);
+      if (index != -1) {
+        setState(() => _messages[index] = sent);
+      }
+    } catch (error) {
+      if (!mounted) {
         return;
       }
-      final sent = _messages[index];
-      setState(() {
-        _messages[index] = Message(
-          id: sent.id,
-          senderId: sent.senderId,
-          body: sent.body,
-          sentAt: sent.sentAt,
-          isMine: sent.isMine,
-          delivery: MessageDelivery.delivered,
-          kind: sent.kind,
-          attachment: sent.attachment,
-          replyTo: sent.replyTo,
-          isEdited: sent.isEdited,
-        );
-      });
-    });
+      final index = _messages.indexWhere((message) => message.id == localId);
+      if (index != -1) {
+        setState(() {
+          _messages[index] = Message(
+            id: pending.id,
+            conversationId: pending.conversationId,
+            senderId: pending.senderId,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            isMine: pending.isMine,
+            kind: pending.kind,
+            attachment: pending.attachment,
+            delivery: MessageDelivery.failed,
+          );
+        });
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(readableError(error))));
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
   }
 
-  void _appendMessage(Message message) {
-    setState(() => _messages.add(message));
-    _scrollToLatest();
-  }
-
-  void _sendMockAttachment(MessageKind kind) {
-    final isImage = kind == MessageKind.image;
-    _appendMessage(
-      Message(
-        id: 'local-${DateTime.now().millisecondsSinceEpoch}',
-        senderId: 'u-0',
-        body: isImage ? 'Image preview attached.' : 'File attached.',
-        sentAt: _timeLabel(),
-        isMine: true,
-        kind: kind,
-        delivery: MessageDelivery.delivered,
-        attachment: MessageAttachment(
-          name: isImage ? 'uranus-orbit.png' : 'project-notes.pdf',
-          type: kind,
-          sizeLabel: isImage ? '842 KB' : '1.8 MB',
-        ),
-      ),
-    );
-  }
-
-  void _toggleRecording() {
-    if (!_isRecording) {
-      setState(() => _isRecording = true);
+  Future<void> _sendText() async {
+    final body = _messageController.text.trim();
+    if (body.isEmpty || _isSending) {
       return;
     }
 
-    setState(() => _isRecording = false);
-    _appendMessage(
-      Message(
-        id: 'local-${DateTime.now().millisecondsSinceEpoch}',
-        senderId: 'u-0',
-        body: 'Voice recording',
-        sentAt: _timeLabel(),
-        isMine: true,
-        kind: MessageKind.audio,
-        delivery: MessageDelivery.delivered,
-        attachment: const MessageAttachment(
-          name: 'voice-note.m4a',
-          type: MessageKind.audio,
-          sizeLabel: '0:08',
-        ),
-      ),
+    _messageController.clear();
+    final localId = 'local-${DateTime.now().millisecondsSinceEpoch}';
+    final pending = Message(
+      id: localId,
+      conversationId: widget.conversation.id,
+      senderId: 'me',
+      body: body,
+      sentAt: _timeLabel(),
+      isMine: true,
+      delivery: MessageDelivery.sending,
     );
+
+    setState(() {
+      _isSending = true;
+      _messages.add(pending);
+    });
+    _scrollToLatest();
+
+    try {
+      final sent = await AppDependencies.chatRepository.sendTextMessage(
+        conversationId: widget.conversation.id,
+        body: body,
+      );
+      if (!mounted) {
+        return;
+      }
+      final index = _messages.indexWhere((message) => message.id == localId);
+      if (index != -1) {
+        setState(() => _messages[index] = sent);
+      }
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final index = _messages.indexWhere((message) => message.id == localId);
+      if (index != -1) {
+        setState(() {
+          _messages[index] = Message(
+            id: pending.id,
+            conversationId: pending.conversationId,
+            senderId: pending.senderId,
+            body: pending.body,
+            sentAt: pending.sentAt,
+            isMine: pending.isMine,
+            delivery: MessageDelivery.failed,
+          );
+        });
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            readableError(
+              error,
+              fallback:
+                  'Message could not be sent. Pull to refresh and try again.',
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSending = false);
+      }
+    }
   }
 
-  void _showAttachSheet() {
+  void _showAttachmentSheet() {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.deepNavy,
@@ -155,20 +295,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             children: [
               ListTile(
                 leading: const Icon(Icons.image_outlined),
-                title: const Text('Send image'),
-                subtitle: const Text('Adds a mock image message'),
+                title: const Text('Image'),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _sendMockAttachment(MessageKind.image);
+                  _sendPickedAttachment(MessageKind.image);
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.attach_file),
-                title: const Text('Send file'),
-                subtitle: const Text('Adds a mock file card'),
+                title: const Text('File'),
                 onTap: () {
                   Navigator.of(context).pop();
-                  _sendMockAttachment(MessageKind.file);
+                  _sendPickedAttachment(MessageKind.file);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.mic_none),
+                title: const Text('Audio'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  _sendPickedAttachment(MessageKind.audio);
                 },
               ),
             ],
@@ -190,6 +336,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           children: [
             UserAvatar(
               initials: friend.initials,
+              imageUrl: friend.imageUrl,
               isOnline: friend.isOnline,
               size: 42,
             ),
@@ -215,56 +362,79 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ),
           ],
         ),
-        actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.call_outlined)),
-          IconButton(onPressed: () {}, icon: const Icon(Icons.more_vert)),
-        ],
       ),
       body: SpaceBackground(
         child: Column(
           children: [
             Expanded(
-              child: ListView.builder(
-                controller: _scrollController,
-                padding: const EdgeInsets.fromLTRB(16, 92, 16, 12),
-                itemCount: _messages.length + 2,
-                itemBuilder: (context, index) {
-                  if (index == 0) {
-                    return Center(
-                      child: GlassPanel(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 8,
-                        ),
-                        child: const Text(
-                          'Encrypted private room preview',
-                          style: TextStyle(
-                            color: AppTheme.textMuted,
-                            fontSize: 12,
-                          ),
-                        ),
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : _error != null && _messages.isEmpty
+                  ? RefreshablePlaceholder(
+                      icon: Icons.cloud_off_outlined,
+                      title: 'Could not load messages',
+                      body: _error!,
+                      onRefresh: _loadMessages,
+                    )
+                  : _messages.isEmpty
+                  ? RefreshablePlaceholder(
+                      icon: Icons.chat_bubble_outline,
+                      title: 'No messages yet',
+                      body:
+                          'Send the first message to start this conversation.',
+                      onRefresh: _loadMessages,
+                    )
+                  : RefreshIndicator(
+                      onRefresh: _loadMessages,
+                      child: ListView.builder(
+                        controller: _scrollController,
+                        padding: const EdgeInsets.fromLTRB(16, 92, 16, 12),
+                        itemCount: _messages.length + (_error == null ? 1 : 2),
+                        itemBuilder: (context, index) {
+                          if (_error != null && index == 0) {
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 10),
+                              child: GlassPanel(
+                                child: Text(
+                                  _error!,
+                                  style: const TextStyle(
+                                    color: AppTheme.textMuted,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          final offset = _error == null ? 0 : 1;
+                          if (index == offset) {
+                            return Center(
+                              child: GlassPanel(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 14,
+                                  vertical: 8,
+                                ),
+                                child: const Text(
+                                  'Private conversation',
+                                  style: TextStyle(
+                                    color: AppTheme.textMuted,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          return _MessageBubble(
+                            message: _messages[index - offset - 1],
+                          );
+                        },
                       ),
-                    );
-                  }
-                  if (index == _messages.length + 1) {
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 2, bottom: 10),
-                      child: Text(
-                        '${friend.username} is typing...',
-                        style: const TextStyle(color: AppTheme.cyan),
-                      ),
-                    );
-                  }
-                  return _MessageBubble(message: _messages[index - 1]);
-                },
-              ),
+                    ),
             ),
             _Composer(
               controller: _messageController,
-              isRecording: _isRecording,
+              isSending: _isSending,
               onSend: _sendText,
-              onAttach: _showAttachSheet,
-              onRecord: _toggleRecording,
+              onAttach: _showAttachmentSheet,
+              onRecord: () => _sendPickedAttachment(MessageKind.audio),
             ),
           ],
         ),
@@ -312,20 +482,6 @@ class _MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (message.replyTo != null)
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .18),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    message.replyTo!.body,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
               if (message.kind == MessageKind.image)
                 _ImageAttachment(message: message, textColor: textColor),
               if (message.kind == MessageKind.file)
@@ -358,23 +514,24 @@ class _ImageAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final url = message.attachment?.previewUrl;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Container(
-          height: 170,
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF122B5A), Color(0xFF1B6C8C)],
-            ),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: const Center(
-            child: Icon(Icons.image_outlined, size: 56, color: Colors.white),
-          ),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: url == null
+              ? Container(
+                  height: 170,
+                  color: AppTheme.deepNavy,
+                  child: const Center(child: Icon(Icons.image_outlined)),
+                )
+              : Image.network(url, height: 170, width: 260, fit: BoxFit.cover),
         ),
-        Text(message.body, style: TextStyle(color: textColor)),
+        if (message.body.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Text(message.body, style: TextStyle(color: textColor)),
+        ],
       ],
     );
   }
@@ -426,27 +583,33 @@ class _AudioAttachment extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final duration = message.attachment?.durationSeconds;
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         Icon(Icons.play_arrow_rounded, color: textColor, size: 32),
         const SizedBox(width: 8),
-        ...List.generate(
-          12,
-          (index) => Container(
-            width: 3,
-            height: 10 + (index % 4) * 5,
-            margin: const EdgeInsets.only(right: 3),
-            decoration: BoxDecoration(
-              color: textColor.withValues(alpha: .72),
-              borderRadius: BorderRadius.circular(4),
-            ),
+        Flexible(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                message.attachment?.name ?? 'Audio message',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: textColor, fontWeight: FontWeight.w800),
+              ),
+              Text(
+                duration == null || duration == 0
+                    ? message.attachment?.sizeLabel ?? 'Audio'
+                    : '${duration}s',
+                style: TextStyle(
+                  color: textColor.withValues(alpha: .7),
+                  fontSize: 12,
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 8),
-        Text(
-          message.attachment?.sizeLabel ?? '0:08',
-          style: TextStyle(color: textColor),
         ),
       ],
     );
@@ -456,14 +619,14 @@ class _AudioAttachment extends StatelessWidget {
 class _Composer extends StatefulWidget {
   const _Composer({
     required this.controller,
-    required this.isRecording,
+    required this.isSending,
     required this.onSend,
     required this.onAttach,
     required this.onRecord,
   });
 
   final TextEditingController controller;
-  final bool isRecording;
+  final bool isSending;
   final VoidCallback onSend;
   final VoidCallback onAttach;
   final VoidCallback onRecord;
@@ -526,25 +689,18 @@ class _ComposerState extends State<_Composer> {
                 textInputAction: TextInputAction.send,
                 onSubmitted: (_) => widget.onSend(),
                 decoration: InputDecoration(
-                  hintText: widget.isRecording
-                      ? 'Recording... tap mic to send'
-                      : 'Message',
+                  hintText: widget.isSending ? 'Sending...' : 'Message',
                 ),
               ),
             ),
             const SizedBox(width: 8),
             IconButton.filledTonal(
               onPressed: widget.onRecord,
-              style: IconButton.styleFrom(
-                backgroundColor: widget.isRecording
-                    ? AppTheme.danger
-                    : AppTheme.surfaceSoft,
-              ),
-              icon: Icon(widget.isRecording ? Icons.stop : Icons.mic),
+              icon: const Icon(Icons.mic_none),
             ),
             const SizedBox(width: 8),
             IconButton.filled(
-              onPressed: _hasText ? widget.onSend : null,
+              onPressed: _hasText && !widget.isSending ? widget.onSend : null,
               icon: const Icon(Icons.send),
             ),
           ],

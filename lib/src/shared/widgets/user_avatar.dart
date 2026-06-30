@@ -5,12 +5,14 @@ import '../../core/theme/app_theme.dart';
 class UserAvatar extends StatelessWidget {
   const UserAvatar({
     required this.initials,
+    this.imageUrl,
     this.isOnline = false,
     this.size = 52,
     super.key,
   });
 
   final String initials;
+  final String? imageUrl;
   final bool isOnline;
   final double size;
 
@@ -37,14 +39,31 @@ class UserAvatar extends StatelessWidget {
                 ),
                 border: Border.all(color: AppTheme.cyan.withValues(alpha: .28)),
               ),
-              child: Text(
-                initials,
-                style: TextStyle(
-                  color: AppTheme.cyan,
-                  fontSize: size * .32,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
+              child: imageUrl == null || imageUrl!.isEmpty
+                  ? Text(
+                      initials,
+                      style: TextStyle(
+                        color: AppTheme.cyan,
+                        fontSize: size * .32,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    )
+                  : ClipOval(
+                      child: Image.network(
+                        imageUrl!,
+                        width: size,
+                        height: size,
+                        fit: BoxFit.cover,
+                        errorBuilder: (_, _, _) => Text(
+                          initials,
+                          style: TextStyle(
+                            color: AppTheme.cyan,
+                            fontSize: size * .32,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
             ),
           ),
           Positioned(

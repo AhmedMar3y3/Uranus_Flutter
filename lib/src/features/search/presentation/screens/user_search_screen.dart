@@ -1,20 +1,65 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
+import '../../../../shared/widgets/refreshable_placeholder.dart';
 import '../../../../shared/widgets/space_background.dart';
-import '../../../../shared/widgets/state_placeholder.dart';
 import '../../../../shared/widgets/user_avatar.dart';
-import '../../../profile/data/mock_users.dart';
+import '../../../profile/domain/entities/app_user.dart';
 
-class UserSearchScreen extends StatelessWidget {
+class UserSearchScreen extends StatefulWidget {
   const UserSearchScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final users = MockUsers.users;
+  State<UserSearchScreen> createState() => _UserSearchScreenState();
+}
 
+class _UserSearchScreenState extends State<UserSearchScreen> {
+  final _controller = TextEditingController();
+  Timer? _debounce;
+  Future<List<AppUser>> _future = AppDependencies.profileRepository.searchUsers(
+    '',
+  );
+
+  Future<List<AppUser>> _loadCurrentQuery() {
+    return AppDependencies.profileRepository.searchUsers(
+      _controller.text.trim(),
+    );
+  }
+
+  Future<void> _refresh() async {
+    final next = _loadCurrentQuery();
+    setState(() => _future = next);
+    try {
+      await next;
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _search(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (mounted) {
+        setState(() {
+          _future = AppDependencies.profileRepository.searchUsers(value.trim());
+        });
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Search')),
       body: SpaceBackground(
@@ -33,8 +78,10 @@ class UserSearchScreen extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    const TextField(
-                      decoration: InputDecoration(
+                    TextField(
+                      controller: _controller,
+                      onChanged: _search,
+                      decoration: const InputDecoration(
                         hintText: 'Search username or full name',
                         prefixIcon: Icon(Icons.search),
                       ),
@@ -44,13 +91,38 @@ class UserSearchScreen extends StatelessWidget {
               ),
             ),
             Expanded(
-              child: users.isEmpty
-                  ? const StatePlaceholder(
-                      icon: Icons.manage_search,
-                      title: 'No users found',
-                      body: 'Try a different username or full name.',
-                    )
-                  : ListView.separated(
+              child: RefreshIndicator(
+                onRefresh: _refresh,
+                child: FutureBuilder<List<AppUser>>(
+                  future: _future,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return RefreshablePlaceholder(
+                        icon: Icons.cloud_off_outlined,
+                        title: 'Search unavailable',
+                        body: readableError(
+                          snapshot.error,
+                          fallback: 'Check your connection and try again.',
+                        ),
+                        onRefresh: _refresh,
+                      );
+                    }
+
+                    final users = snapshot.data ?? const <AppUser>[];
+                    if (users.isEmpty) {
+                      return RefreshablePlaceholder(
+                        icon: Icons.manage_search,
+                        title: 'No users found',
+                        body: 'Try a different username or full name.',
+                        onRefresh: _refresh,
+                      );
+                    }
+
+                    return ListView.separated(
+                      physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 104),
                       itemCount: users.length,
                       separatorBuilder: (_, _) => const SizedBox(height: 10),
@@ -65,6 +137,7 @@ class UserSearchScreen extends StatelessWidget {
                             ),
                             leading: UserAvatar(
                               initials: user.initials,
+                              imageUrl: user.imageUrl,
                               isOnline: user.isOnline,
                             ),
                             title: Text(
@@ -81,7 +154,10 @@ class UserSearchScreen extends StatelessWidget {
                           ),
                         );
                       },
-                    ),
+                    );
+                  },
+                ),
+              ),
             ),
           ],
         ),

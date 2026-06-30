@@ -1,78 +1,186 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
+import '../../../../shared/widgets/refreshable_placeholder.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/user_avatar.dart';
-import '../../../profile/data/mock_users.dart';
-import '../../../profile/domain/entities/app_user.dart';
+import '../../domain/entities/friend_request.dart';
 
-class FriendRequestsScreen extends StatelessWidget {
+class FriendRequestsScreen extends StatefulWidget {
   const FriendRequestsScreen({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final received = MockUsers.users
-        .where(
-          (user) => user.friendshipStatus == FriendshipStatus.requestReceived,
-        )
-        .toList();
-    final sent = MockUsers.users
-        .where((user) => user.friendshipStatus == FriendshipStatus.requestSent)
-        .toList();
+  State<FriendRequestsScreen> createState() => _FriendRequestsScreenState();
+}
 
+class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
+  late Future<FriendRequests> _future = _loadRequests();
+
+  Future<FriendRequests> _loadRequests() {
+    return AppDependencies.friendsRepository.getRequests();
+  }
+
+  Future<void> _refresh() async {
+    final next = _loadRequests();
+    setState(() => _future = next);
+    try {
+      await next;
+    } catch (_) {}
+  }
+
+  Future<void> _runAction(Future<void> Function() action) async {
+    try {
+      await action();
+      await _refresh();
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(readableError(error))));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Friend requests')),
       body: SpaceBackground(
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            const Text(
-              'Received Requests',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            for (final user in received)
-              _RequestTile(user: user, actions: const ['Accept', 'Reject']),
-            const SizedBox(height: 24),
-            const Text(
-              'Sent Requests',
-              style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
-            ),
-            const SizedBox(height: 8),
-            for (final user in sent)
-              _RequestTile(user: user, actions: const ['Cancel']),
-          ],
+        child: FutureBuilder<FriendRequests>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            if (snapshot.hasError) {
+              return RefreshablePlaceholder(
+                icon: Icons.cloud_off_outlined,
+                title: 'Could not load requests',
+                body: readableError(snapshot.error),
+                onRefresh: _refresh,
+              );
+            }
+
+            final requests = snapshot.data!;
+            if (requests.received.isEmpty && requests.sent.isEmpty) {
+              return RefreshablePlaceholder(
+                icon: Icons.pending_actions_outlined,
+                title: 'No pending requests',
+                body: 'Received and sent friend requests will appear here.',
+                onRefresh: _refresh,
+              );
+            }
+
+            return RefreshIndicator(
+              onRefresh: _refresh,
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                children: [
+                  _SectionTitle(
+                    title: 'Received Requests',
+                    count: requests.received.length,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final request in requests.received)
+                    _RequestTile(
+                      request: request,
+                      actions: [
+                        TextButton(
+                          onPressed: () => _runAction(
+                            () => AppDependencies.friendsRepository.accept(
+                              request.user.id,
+                            ),
+                          ),
+                          child: const Text('Accept'),
+                        ),
+                        TextButton(
+                          onPressed: () => _runAction(
+                            () => AppDependencies.friendsRepository.reject(
+                              request.user.id,
+                            ),
+                          ),
+                          child: const Text('Reject'),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 22),
+                  _SectionTitle(
+                    title: 'Sent Requests',
+                    count: requests.sent.length,
+                  ),
+                  const SizedBox(height: 8),
+                  for (final request in requests.sent)
+                    _RequestTile(
+                      request: request,
+                      actions: [
+                        TextButton(
+                          onPressed: () => _runAction(
+                            () => AppDependencies.friendsRepository.cancel(
+                              request.user.id,
+                            ),
+                          ),
+                          child: const Text('Cancel'),
+                        ),
+                      ],
+                    ),
+                ],
+              ),
+            );
+          },
         ),
       ),
     );
   }
 }
 
-class _RequestTile extends StatelessWidget {
-  const _RequestTile({required this.user, required this.actions});
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.count});
 
-  final AppUser user;
-  final List<String> actions;
+  final String title;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
-    return GlassPanel(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: EdgeInsets.zero,
-      child: ListTile(
-        leading: UserAvatar(initials: user.initials, isOnline: user.isOnline),
-        title: Text(user.fullName),
-        subtitle: Text(
-          '@${user.username}',
-          style: const TextStyle(color: AppTheme.textMuted),
-        ),
-        trailing: Wrap(
-          spacing: 6,
-          children: [
-            for (final action in actions)
-              TextButton(onPressed: () {}, child: Text(action)),
-          ],
+    return Text(
+      '$title ($count)',
+      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+    );
+  }
+}
+
+class _RequestTile extends StatelessWidget {
+  const _RequestTile({required this.request, required this.actions});
+
+  final FriendRequest request;
+  final List<Widget> actions;
+
+  @override
+  Widget build(BuildContext context) {
+    final user = request.user;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: GlassPanel(
+        padding: EdgeInsets.zero,
+        child: ListTile(
+          leading: UserAvatar(
+            initials: user.initials,
+            imageUrl: user.imageUrl,
+            isOnline: user.isOnline,
+          ),
+          title: Text(
+            user.fullName,
+            style: const TextStyle(fontWeight: FontWeight.w800),
+          ),
+          subtitle: Text(
+            '@${user.username}',
+            style: const TextStyle(color: AppTheme.textMuted),
+          ),
+          trailing: Wrap(spacing: 6, children: actions),
         ),
       ),
     );

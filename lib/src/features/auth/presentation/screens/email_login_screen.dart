@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_logo.dart';
 import '../../../../shared/widgets/glass_panel.dart';
@@ -17,6 +19,7 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
   final _emailController = TextEditingController();
   bool _submitted = false;
   bool _isLoading = false;
+  String? _serverError;
 
   bool get _isValidEmail {
     final value = _emailController.text.trim();
@@ -30,19 +33,29 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
   }
 
   Future<void> _continue() async {
-    setState(() => _submitted = true);
+    setState(() {
+      _submitted = true;
+      _serverError = null;
+    });
     if (!_isValidEmail) {
       return;
     }
 
     setState(() => _isLoading = true);
-    await Future<void>.delayed(const Duration(milliseconds: 450));
-
-    if (!mounted) {
-      return;
+    try {
+      final email = _emailController.text.trim();
+      await AppDependencies.authRepository.requestOtp(email);
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pushNamed(AppRouter.otp, arguments: email);
+    } catch (error) {
+      setState(() => _serverError = readableError(error));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
-    Navigator.of(context).pushNamed(AppRouter.otp);
-    setState(() => _isLoading = false);
   }
 
   @override
@@ -81,7 +94,7 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
                     textInputAction: TextInputAction.done,
                     onChanged: (_) {
                       if (_submitted) {
-                        setState(() {});
+                        setState(() => _serverError = null);
                       }
                     },
                     onSubmitted: (_) => _continue(),
@@ -94,6 +107,13 @@ class _EmailLoginScreenState extends State<EmailLoginScreen> {
                           : null,
                     ),
                   ),
+                  if (_serverError != null) ...[
+                    const SizedBox(height: 10),
+                    Text(
+                      _serverError!,
+                      style: const TextStyle(color: AppTheme.danger),
+                    ),
+                  ],
                   const SizedBox(height: 18),
                   ElevatedButton.icon(
                     onPressed: _isLoading ? null : _continue,

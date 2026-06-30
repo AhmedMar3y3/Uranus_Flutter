@@ -11,29 +11,30 @@ class AppLogo extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: size,
-      height: size,
-      padding: EdgeInsets.all(size * .12),
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF112B5F), Color(0xFF091021), Color(0xFF1C3E72)],
+    return RepaintBoundary(
+      child: Container(
+        width: size,
+        height: size,
+        padding: EdgeInsets.all(size * .04),
+        decoration: BoxDecoration(
+          color: AppTheme.surface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppTheme.cyan.withValues(alpha: .42)),
+          boxShadow: showGlow
+              ? [
+                  BoxShadow(
+                    color: AppTheme.cyan.withValues(alpha: .22),
+                    blurRadius: 20,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : null,
         ),
-        border: Border.all(color: AppTheme.cyan.withValues(alpha: .55)),
-        boxShadow: showGlow
-            ? [
-                BoxShadow(
-                  color: AppTheme.cyan.withValues(alpha: .28),
-                  blurRadius: 36,
-                  spreadRadius: 3,
-                ),
-              ]
-            : null,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: Image.asset(AppAssets.icon, fit: BoxFit.cover),
+        ),
       ),
-      child: Image.asset(AppAssets.icon, fit: BoxFit.contain),
     );
   }
 }

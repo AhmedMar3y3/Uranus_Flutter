@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/app_logo.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
+import '../../../profile/domain/entities/app_user.dart';
 
 class CompleteProfileScreen extends StatefulWidget {
   const CompleteProfileScreen({super.key});
@@ -15,24 +18,51 @@ class CompleteProfileScreen extends StatefulWidget {
 
 class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
   final _usernameController = TextEditingController();
+  final _fullNameController = TextEditingController();
+  final _bioController = TextEditingController();
   String _gender = 'female';
   bool _submitted = false;
+  bool _isLoading = false;
+  String? _serverError;
 
-  bool get _usernameTaken =>
-      _usernameController.text.trim().toLowerCase() == 'uranus';
+  bool get _usernameInvalid => _usernameController.text.trim().length < 3;
 
   @override
   void dispose() {
     _usernameController.dispose();
+    _fullNameController.dispose();
+    _bioController.dispose();
     super.dispose();
   }
 
-  void _complete() {
-    setState(() => _submitted = true);
-    if (_usernameTaken) {
+  Future<void> _complete() async {
+    setState(() {
+      _submitted = true;
+      _serverError = null;
+    });
+    if (_usernameInvalid) {
       return;
     }
-    Navigator.of(context).pushReplacementNamed(AppRouter.shell);
+
+    setState(() => _isLoading = true);
+    try {
+      await AppDependencies.profileRepository.completeProfile(
+        username: _usernameController.text.trim(),
+        fullName: _fullNameController.text.trim(),
+        gender: _gender == 'male' ? Gender.male : Gender.female,
+        bio: _bioController.text.trim(),
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pushReplacementNamed(AppRouter.shell);
+    } catch (error) {
+      setState(() => _serverError = readableError(error));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
+    }
   }
 
   @override
@@ -61,17 +91,18 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                 children: [
                   TextField(
                     controller: _usernameController,
-                    onChanged: (_) => setState(() {}),
+                    onChanged: (_) => setState(() => _serverError = null),
                     decoration: InputDecoration(
                       labelText: 'Username',
                       prefixIcon: const Icon(Icons.alternate_email),
-                      errorText: _submitted && _usernameTaken
-                          ? 'Username already taken'
+                      errorText: _submitted && _usernameInvalid
+                          ? 'Username must be at least 3 characters'
                           : null,
                     ),
                   ),
                   const SizedBox(height: 16),
-                  const TextField(
+                  TextField(
+                    controller: _fullNameController,
                     decoration: InputDecoration(
                       labelText: 'Full name',
                       prefixIcon: Icon(Icons.badge_outlined),
@@ -97,7 +128,8 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                     },
                   ),
                   const SizedBox(height: 16),
-                  const TextField(
+                  TextField(
+                    controller: _bioController,
                     minLines: 3,
                     maxLines: 4,
                     decoration: InputDecoration(
@@ -106,11 +138,24 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
                       prefixIcon: Icon(Icons.notes_outlined),
                     ),
                   ),
+                  if (_serverError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _serverError!,
+                      style: const TextStyle(color: AppTheme.danger),
+                    ),
+                  ],
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
-                    onPressed: _complete,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('Complete profile'),
+                    onPressed: _isLoading ? null : _complete,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_circle_outline),
+                    label: Text(_isLoading ? 'Saving' : 'Complete profile'),
                   ),
                 ],
               ),

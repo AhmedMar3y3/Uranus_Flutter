@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../../app/app_dependencies.dart';
 import '../../../../app/router.dart';
+import '../../../../core/network/error_messages.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
@@ -20,6 +22,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
   final _focusNodes = List.generate(6, (_) => FocusNode());
   bool _submitted = false;
   bool _isLoading = false;
+  String? _serverError;
 
   String get _code => _controllers.map((controller) => controller.text).join();
 
@@ -58,21 +61,31 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     setState(() {
       _submitted = true;
       _isLoading = true;
+      _serverError = null;
     });
-    await Future<void>.delayed(const Duration(milliseconds: 350));
-
-    if (!mounted) {
-      return;
-    }
-    setState(() => _isLoading = false);
-    if (_code == '123456') {
-      Navigator.of(context).pushReplacementNamed(AppRouter.completeProfile);
+    try {
+      final result = await AppDependencies.authRepository.verifyOtp(
+        widget.email,
+        _code,
+      );
+      if (!mounted) {
+        return;
+      }
+      Navigator.of(context).pushReplacementNamed(
+        result.completedProfile ? AppRouter.shell : AppRouter.completeProfile,
+      );
+    } catch (error) {
+      setState(() => _serverError = readableError(error));
+    } finally {
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final showError = _submitted && _code != '123456';
+    final showError = _submitted && _code.length != 6;
 
     return Scaffold(
       appBar: AppBar(),
@@ -136,8 +149,15 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                   if (showError) ...[
                     const SizedBox(height: 12),
                     const Text(
-                      'Use 123456 for this static preview.',
+                      'Enter the 6 digit code sent to your email.',
                       style: TextStyle(color: AppTheme.danger),
+                    ),
+                  ],
+                  if (_serverError != null) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      _serverError!,
+                      style: const TextStyle(color: AppTheme.danger),
                     ),
                   ],
                   const SizedBox(height: 18),

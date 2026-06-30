@@ -16,6 +16,8 @@ import '../features/profile/presentation/screens/public_profile_screen.dart';
 import '../features/shell/presentation/main_shell.dart';
 
 class AppRouter {
+  static final navigatorKey = GlobalKey<NavigatorState>();
+
   static const splash = '/';
   static const login = '/login';
   static const otp = '/otp';
@@ -32,10 +34,13 @@ class AppRouter {
     final Widget screen = switch (settings.name) {
       splash => const SplashScreen(),
       login => const EmailLoginScreen(),
-      otp => const OtpVerificationScreen(email: 'noura@uranus.app'),
+      otp => OtpVerificationScreen(email: settings.arguments?.toString() ?? ''),
       completeProfile => const CompleteProfileScreen(),
       shell => const MainShell(),
-      chat => ChatRoomScreen(conversation: settings.arguments as Conversation?),
+      chat =>
+        settings.arguments is String
+            ? ChatRoomScreen.fromConversationId(settings.arguments! as String)
+            : ChatRoomScreen(conversation: settings.arguments as Conversation?),
       publicProfile => PublicProfileScreen(
         user: settings.arguments as AppUser?,
       ),
@@ -47,5 +52,28 @@ class AppRouter {
     };
 
     return MaterialPageRoute(builder: (_) => screen, settings: settings);
+  }
+
+  static void openNotification(Map<String, dynamic> data) {
+    final navigator = navigatorKey.currentState;
+    if (navigator == null) {
+      return;
+    }
+
+    switch (data['type']?.toString()) {
+      case 'message.sent':
+      case 'message.edited':
+      case 'message.deleted':
+        final conversationId = data['conversation_id']?.toString();
+        if (conversationId != null && conversationId.isNotEmpty) {
+          navigator.pushNamed(chat, arguments: conversationId);
+        }
+      case 'friend.requested':
+      case 'friend.rejected':
+        navigator.pushNamed(friendRequests);
+      case 'friend.accepted':
+      case 'friend.blocked':
+        navigator.pushNamed(shell);
+    }
   }
 }

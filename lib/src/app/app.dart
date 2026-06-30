@@ -12,6 +12,7 @@ class UranusApp extends StatelessWidget {
       title: 'Uranus',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
+      navigatorKey: AppRouter.navigatorKey,
       initialRoute: AppRouter.splash,
       onGenerateRoute: AppRouter.onGenerateRoute,
     );

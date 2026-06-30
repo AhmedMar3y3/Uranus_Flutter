@@ -8,12 +8,14 @@ class MessageAttachment {
     required this.type,
     this.sizeLabel,
     this.previewUrl,
+    this.durationSeconds,
   });
 
   final String name;
   final MessageKind type;
   final String? sizeLabel;
   final String? previewUrl;
+  final int? durationSeconds;
 }
 
 class Message {
@@ -23,6 +25,7 @@ class Message {
     required this.body,
     required this.sentAt,
     required this.isMine,
+    required this.conversationId,
     this.kind = MessageKind.text,
     this.delivery = MessageDelivery.delivered,
     this.attachment,
@@ -32,6 +35,7 @@ class Message {
 
   final String id;
   final String senderId;
+  final String conversationId;
   final String body;
   final String sentAt;
   final bool isMine;
