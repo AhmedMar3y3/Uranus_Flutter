@@ -26,7 +26,9 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
 
   Future<void> _refresh() async {
     final next = _loadProfile();
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {}
@@ -36,6 +38,7 @@ class _MyProfileScreenState extends State<MyProfileScreen> {
     try {
       await AppDependencies.notificationService.deleteTokenIfAuthenticated();
     } catch (_) {}
+    await AppDependencies.presenceService.stopForegroundSession();
     await AppDependencies.sessionManager.clear();
     if (!context.mounted) {
       return;

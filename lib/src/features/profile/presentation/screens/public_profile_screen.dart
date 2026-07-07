@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/app_dependencies.dart';
@@ -7,6 +9,7 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/user_avatar.dart';
+import '../../../presence/data/presence_service.dart';
 import '../../domain/entities/app_user.dart';
 
 class PublicProfileScreen extends StatefulWidget {
@@ -34,12 +37,29 @@ class PublicProfileScreen extends StatefulWidget {
 class _PublicProfileScreenState extends State<PublicProfileScreen> {
   late Future<AppUser> _future = AppDependencies.profileRepository
       .getUserProfile(widget.initialUser.id);
+  StreamSubscription<PresenceUpdate>? _presenceSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _presenceSubscription = AppDependencies.presenceService.updates.listen(
+      _applyPresenceUpdate,
+    );
+  }
+
+  @override
+  void dispose() {
+    _presenceSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<void> _refresh() async {
     final next = AppDependencies.profileRepository.getUserProfile(
       widget.initialUser.id,
     );
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {}
@@ -61,6 +81,20 @@ class _PublicProfileScreenState extends State<PublicProfileScreen> {
         context,
       ).showSnackBar(SnackBar(content: Text(readableError(error))));
     }
+  }
+
+  void _applyPresenceUpdate(PresenceUpdate update) {
+    if (!mounted || update.userId != widget.initialUser.id) {
+      return;
+    }
+    setState(() {
+      _future = _future.then(
+        (user) => user.copyWith(
+          isOnline: update.online,
+          lastSeen: update.lastSeen,
+        ),
+      );
+    });
   }
 
   @override
@@ -216,9 +250,40 @@ class _FriendshipActions extends StatelessWidget {
                   if (!context.mounted) {
                     return;
                   }
-                  ScaffoldMessenger.of(
-                    context,
-                  ).showSnackBar(SnackBar(content: Text(readableError(error))));
+                  if (isFriendOnlyChatError(error)) {
+                    await showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        icon: const Icon(Icons.lock_outline, size: 34),
+                        title: const Text('You are not friends yet'),
+                        content: const Text(
+                          friendOnlyChatMessage,
+                          textAlign: TextAlign.center,
+                        ),
+                        actions: [
+                          FilledButton(
+                            onPressed: () =>
+                                Navigator.of(dialogContext).pop(),
+                            child: const Text('Got it'),
+                          ),
+                        ],
+                      ),
+                    );
+                    return;
+                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      behavior: SnackBarBehavior.floating,
+                      duration: const Duration(seconds: 5),
+                      content: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Colors.white),
+                          const SizedBox(width: 10),
+                          Expanded(child: Text(readableError(error))),
+                        ],
+                      ),
+                    ),
+                  );
                 }
               },
               icon: const Icon(Icons.message),

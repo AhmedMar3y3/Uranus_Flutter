@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/app_dependencies.dart';
@@ -9,6 +11,7 @@ import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/state_placeholder.dart';
 import '../../../../shared/widgets/user_avatar.dart';
+import '../../../presence/data/presence_service.dart';
 import '../../domain/entities/conversation.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -21,6 +24,21 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   String _filter = 'All';
   late Future<List<Conversation>> _future = _loadConversations();
+  StreamSubscription<PresenceUpdate>? _presenceSubscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _presenceSubscription = AppDependencies.presenceService.updates.listen(
+      _applyPresenceUpdate,
+    );
+  }
+
+  @override
+  void dispose() {
+    _presenceSubscription?.cancel();
+    super.dispose();
+  }
 
   Future<List<Conversation>> _loadConversations() {
     return AppDependencies.chatRepository.getConversations();
@@ -28,12 +46,36 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _refresh() async {
     final next = _loadConversations();
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {
       // FutureBuilder renders the error state; refresh should still finish.
     }
+  }
+
+  void _applyPresenceUpdate(PresenceUpdate update) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _future = _future.then(
+        (conversations) => conversations.map((conversation) {
+          final friend = conversation.friend;
+          if (friend.id != update.userId) {
+            return conversation;
+          }
+          return conversation.copyWith(
+            friend: friend.copyWith(
+              isOnline: update.online,
+              lastSeen: update.lastSeen,
+            ),
+          );
+        }).toList(),
+      );
+    });
   }
 
   @override
@@ -149,31 +191,6 @@ class _HomeHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        GlassPanel(
-          padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Command deck',
-                style: TextStyle(color: AppTheme.cyan, fontSize: 12),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Signal room',
-                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Live friends, quiet chats, and unread messages in one orbit.',
-                style: TextStyle(color: AppTheme.textMuted),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
         SizedBox(
           width: double.infinity,
           child: SegmentedButton<String>(

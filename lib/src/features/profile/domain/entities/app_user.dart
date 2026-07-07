@@ -34,4 +34,36 @@ class AppUser {
   final bool completedProfile;
 
   String get statusLabel => isOnline ? 'Online now' : 'Last seen $lastSeen';
+
+  AppUser copyWith({
+    String? id,
+    String? username,
+    String? fullName,
+    String? initials,
+    Gender? gender,
+    String? bio,
+    int? friendsCount,
+    int? mutualFriendsCount,
+    bool? isOnline,
+    String? lastSeen,
+    String? imageUrl,
+    FriendshipStatus? friendshipStatus,
+    bool? completedProfile,
+  }) {
+    return AppUser(
+      id: id ?? this.id,
+      username: username ?? this.username,
+      fullName: fullName ?? this.fullName,
+      initials: initials ?? this.initials,
+      gender: gender ?? this.gender,
+      bio: bio ?? this.bio,
+      friendsCount: friendsCount ?? this.friendsCount,
+      mutualFriendsCount: mutualFriendsCount ?? this.mutualFriendsCount,
+      isOnline: isOnline ?? this.isOnline,
+      lastSeen: lastSeen ?? this.lastSeen,
+      imageUrl: imageUrl ?? this.imageUrl,
+      friendshipStatus: friendshipStatus ?? this.friendshipStatus,
+      completedProfile: completedProfile ?? this.completedProfile,
+    );
+  }
 }

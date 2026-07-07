@@ -14,6 +14,8 @@ typedef ChatMessageDeleteHandler = void Function(String messageId);
 typedef ChatMessageStatusHandler =
     void Function(String messageId, MessageDelivery delivery);
 typedef ChatTypingHandler = void Function(String userId, bool isTyping);
+typedef PresenceChangedHandler =
+    void Function(String userId, bool online, String? lastSeen);
 
 class PusherChatService {
   PusherChatService({required this.sessionManager, http.Client? httpClient})
@@ -31,6 +33,7 @@ class PusherChatService {
   bool _connected = false;
   final Set<String> _channels = {};
   final Map<String, _ConversationHandlers> _handlers = {};
+  final Set<PresenceChangedHandler> _presenceHandlers = {};
 
   Future<void> subscribeToConversation({
     required String conversationId,
@@ -74,6 +77,28 @@ class PusherChatService {
     await _pusher.unsubscribe(channelName: channelName);
   }
 
+  Future<void> subscribeToPresence(PresenceChangedHandler handler) async {
+    if (!await sessionManager.hasToken) {
+      return;
+    }
+
+    await _initialize();
+    _presenceHandlers.add(handler);
+    const channelName = 'presence-online';
+    if (!_channels.contains(channelName)) {
+      await _pusher.subscribe(channelName: channelName);
+      _channels.add(channelName);
+    }
+    if (!_connected) {
+      await _pusher.connect();
+      _connected = true;
+    }
+  }
+
+  void removePresenceHandler(PresenceChangedHandler handler) {
+    _presenceHandlers.remove(handler);
+  }
+
   Future<void> _initialize() async {
     if (_initialized) {
       return;
@@ -89,12 +114,27 @@ class PusherChatService {
   }
 
   Future<void> _handleEvent(PusherEvent event) async {
+    final payload = _payload(event.data);
+    if (event.channelName == 'presence-online' &&
+        event.eventName == 'presence.changed') {
+      final userId = payload['user_id']?.toString() ?? '';
+      if (userId.isEmpty) {
+        return;
+      }
+      final online = payload['online'] == true;
+      final lastSeen = payload['last_seen']?.toString();
+      for (final handler in List<PresenceChangedHandler>.from(
+        _presenceHandlers,
+      )) {
+        handler(userId, online, lastSeen);
+      }
+      return;
+    }
+
     final handlers = _handlers[event.channelName];
     if (handlers == null) {
       return;
     }
-
-    final payload = _payload(event.data);
 
     switch (event.eventName) {
       case 'message.sent':

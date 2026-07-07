@@ -5,7 +5,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../../app/router.dart';
@@ -72,9 +72,9 @@ class NotificationService {
     );
     await FirebaseMessaging.instance
         .setForegroundNotificationPresentationOptions(
-          alert: true,
-          badge: true,
-          sound: true,
+          alert: false,
+          badge: false,
+          sound: false,
         );
 
     FirebaseMessaging.onMessage.listen(_handleForegroundMessage);
@@ -146,23 +146,9 @@ class NotificationService {
     }
   }
 
-  void _handleForegroundMessage(RemoteMessage message) {
-    unawaited(_showForegroundNotification(message));
-    final context = AppRouter.navigatorKey.currentContext;
-    final title = message.notification?.title ?? 'Uranus';
-    final body = message.notification?.body ?? 'New notification';
-    if (context == null) {
-      return;
-    }
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('$title\n$body'),
-        action: SnackBarAction(
-          label: 'Open',
-          onPressed: () => _handleMessageTap(message),
-        ),
-      ),
-    );
+  void _handleForegroundMessage(RemoteMessage _) {
+    // Realtime in-app updates are handled by the active screens. While the app
+    // is open, push messages should stay silent instead of surfacing alerts.
   }
 
   void _handleMessageTap(RemoteMessage message) {
@@ -197,41 +183,6 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin
         >()
         ?.requestNotificationsPermission();
-  }
-
-  Future<void> _showForegroundNotification(RemoteMessage message) async {
-    final data = message.data;
-    final title =
-        message.notification?.title ??
-        data['title']?.toString() ??
-        data['sender_name']?.toString() ??
-        'Uranus';
-    final body =
-        message.notification?.body ??
-        data['body']?.toString() ??
-        (data['type'] == 'message.sent' ? 'New message' : 'New notification');
-
-    try {
-      await _localNotifications.show(
-        id: DateTime.now().millisecondsSinceEpoch.remainder(100000),
-        title: title,
-        body: body,
-        notificationDetails: NotificationDetails(
-          android: AndroidNotificationDetails(
-            _messageChannel.id,
-            _messageChannel.name,
-            channelDescription: _messageChannel.description,
-            importance: Importance.high,
-            priority: Priority.high,
-            category: AndroidNotificationCategory.message,
-          ),
-          iOS: const DarwinNotificationDetails(),
-        ),
-        payload: jsonEncode(data),
-      );
-    } catch (_) {
-      return;
-    }
   }
 
   String get _platform {

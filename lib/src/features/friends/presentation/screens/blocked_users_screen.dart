@@ -25,7 +25,9 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
 
   Future<void> _refresh() async {
     final next = _loadBlocked();
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {}

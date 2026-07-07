@@ -131,7 +131,7 @@ class RemoteChatRepository implements ChatRepository {
     required String conversationId,
     required String messageId,
   }) async {
-    await apiClient.delete(
+    await apiClient.deleteVoid(
       '/conversations/$conversationId/messages/$messageId',
     );
   }
@@ -155,7 +155,7 @@ class RemoteChatRepository implements ChatRepository {
     required String conversationId,
     required bool isTyping,
   }) async {
-    await apiClient.post(
+    await apiClient.postVoid(
       '/conversations/$conversationId/typing',
       body: {'is_typing': isTyping},
     );

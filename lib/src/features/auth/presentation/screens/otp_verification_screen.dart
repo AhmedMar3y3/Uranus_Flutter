@@ -68,11 +68,13 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         widget.email,
         _code,
       );
+      await AppDependencies.presenceService.startForegroundSession();
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pushReplacementNamed(
+      Navigator.of(context).pushNamedAndRemoveUntil(
         result.completedProfile ? AppRouter.shell : AppRouter.completeProfile,
+        (route) => false,
       );
     } catch (error) {
       setState(() => _serverError = readableError(error));
@@ -136,6 +138,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                                   controller: _controllers[index],
                                   focusNode: _focusNodes[index],
                                   textAlign: TextAlign.center,
+                                  textAlignVertical: TextAlignVertical.center,
+                                  textDirection: TextDirection.ltr,
                                   maxLength: 1,
                                   keyboardType: TextInputType.number,
                                   inputFormatters: [
@@ -145,6 +149,9 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                                       _onDigitChanged(value, index),
                                   decoration: const InputDecoration(
                                     counterText: '',
+                                    contentPadding: EdgeInsets.symmetric(
+                                      vertical: 14,
+                                    ),
                                   ),
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w900,
@@ -174,10 +181,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
                       const Text(
                         'Code expires in 5 minutes',
                         style: TextStyle(color: AppTheme.textMuted),
-                      ),
-                      TextButton(
-                        onPressed: () {},
-                        child: const Text('Resend code'),
                       ),
                       const SizedBox(height: 10),
                       ElevatedButton.icon(

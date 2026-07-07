@@ -19,7 +19,7 @@ class ApiClient {
     Map<String, String>? query,
     bool authenticated = true,
   }) {
-    final uri = _uri(path, query);
+    final uri = _uri(path, _freshQuery(query));
     return _send(
       () async => httpClient.get(uri, headers: await _headers(authenticated)),
     );
@@ -32,6 +32,21 @@ class ApiClient {
   }) {
     final uri = _uri(path);
     return _send(
+      () async => httpClient.post(
+        uri,
+        headers: await _headers(authenticated, json: true),
+        body: jsonEncode(body ?? <String, dynamic>{}),
+      ),
+    );
+  }
+
+  Future<void> postVoid(
+    String path, {
+    Map<String, dynamic>? body,
+    bool authenticated = true,
+  }) {
+    final uri = _uri(path);
+    return _sendVoid(
       () async => httpClient.post(
         uri,
         headers: await _headers(authenticated, json: true),
@@ -62,6 +77,21 @@ class ApiClient {
   }) {
     final uri = _uri(path);
     return _send(
+      () async => httpClient.delete(
+        uri,
+        headers: await _headers(authenticated, json: true),
+        body: jsonEncode(body ?? <String, dynamic>{}),
+      ),
+    );
+  }
+
+  Future<void> deleteVoid(
+    String path, {
+    Map<String, dynamic>? body,
+    bool authenticated = true,
+  }) {
+    final uri = _uri(path);
+    return _sendVoid(
       () async => httpClient.delete(
         uri,
         headers: await _headers(authenticated, json: true),
@@ -106,6 +136,8 @@ class ApiClient {
     bool json = false,
   }) async {
     final headers = <String, String>{'Accept': 'application/json'};
+    headers['Cache-Control'] = 'no-cache, no-store, must-revalidate';
+    headers['Pragma'] = 'no-cache';
     if (json) {
       headers['Content-Type'] = 'application/json';
     }
@@ -123,7 +155,7 @@ class ApiClient {
     Future<http.Response> Function() request,
   ) async {
     try {
-      final response = await request().timeout(ApiConfig.requestTimeout);
+      final response = await _withNetworkRetry(request);
       return _parseResponse(response.statusCode, response.body);
     } on ApiException {
       rethrow;
@@ -131,6 +163,45 @@ class ApiClient {
       throw const ApiException('Request timed out. Please try again.');
     } catch (_) {
       throw const ApiException('Network error. Please check your connection.');
+    }
+  }
+
+  Future<void> _sendVoid(Future<http.Response> Function() request) async {
+    try {
+      final response = await _withNetworkRetry(request);
+      if (response.statusCode < 400) {
+        return;
+      }
+      _parseResponse(response.statusCode, response.body);
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      throw const ApiException('Request timed out. Please try again.');
+    } catch (_) {
+      throw const ApiException('Network error. Please check your connection.');
+    }
+  }
+
+  Map<String, String> _freshQuery(Map<String, String>? query) {
+    return {
+      ...?query,
+      '_': DateTime.now().millisecondsSinceEpoch.toString(),
+    };
+  }
+
+  Future<http.Response> _withNetworkRetry(
+    Future<http.Response> Function() request,
+  ) async {
+    try {
+      return await request().timeout(ApiConfig.requestTimeout);
+    } on ApiException {
+      rethrow;
+    } on TimeoutException {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      return request().timeout(ApiConfig.requestTimeout);
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      return request().timeout(ApiConfig.requestTimeout);
     }
   }
 
@@ -148,14 +219,18 @@ class ApiClient {
         code: statusCode,
       );
     }
-    final status = decoded['status'] as Map<String, dynamic>?;
-    final success = status?['success'] as bool? ?? statusCode < 400;
+    final rawStatus = decoded['status'];
+    final status = rawStatus is Map<String, dynamic> ? rawStatus : null;
+    final success = status?['success'] is bool
+        ? status!['success'] as bool
+        : statusCode < 400;
 
     if (!success || statusCode >= 400) {
+      final errors = decoded['errors'];
       throw ApiException(
         status?['message']?.toString() ?? 'Request failed.',
-        code: status?['code'] as int?,
-        errors: decoded['errors'] as Map<String, dynamic>?,
+        code: status?['code'] is int ? status!['code'] as int : null,
+        errors: errors is Map<String, dynamic> ? errors : null,
       );
     }
 

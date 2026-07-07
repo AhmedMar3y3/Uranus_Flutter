@@ -55,7 +55,9 @@ class _CompleteProfileScreenState extends State<CompleteProfileScreen> {
       if (!mounted) {
         return;
       }
-      Navigator.of(context).pushReplacementNamed(AppRouter.shell);
+      Navigator.of(
+        context,
+      ).pushNamedAndRemoveUntil(AppRouter.shell, (route) => false);
     } catch (error) {
       setState(() => _serverError = readableError(error));
     } finally {

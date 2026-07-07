@@ -1,3 +1,4 @@
+import '../../../core/network/api_config.dart';
 import '../domain/entities/app_user.dart';
 
 class UserMapper {
@@ -17,9 +18,16 @@ class UserMapper {
       isOnline: json['online'] as bool? ?? json['is_online'] as bool? ?? false,
       lastSeen: _lastSeen(json['last_seen'] ?? json['last_seen_at']),
       imageUrl:
-          json['profile_image']?.toString() ??
-          json['image']?.toString() ??
-          json['image_path']?.toString(),
+          _url(
+            json['profile_image'] ??
+                json['profile_image_url'] ??
+                json['profile_photo_url'] ??
+                json['avatar'] ??
+                json['photo'] ??
+                json['image'] ??
+                json['image_url'] ??
+                json['image_path'],
+          ),
       friendshipStatus: _friendshipStatus(
         json['friendship_status']?.toString(),
       ),
@@ -78,5 +86,17 @@ class UserMapper {
       return '${diff.inHours}h ago';
     }
     return '${diff.inDays}d ago';
+  }
+
+  static String? _url(dynamic value) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      return text;
+    }
+    final path = text.startsWith('/') ? text : '/$text';
+    return '${ApiConfig.baseUrl}$path';
   }
 }

@@ -19,4 +19,24 @@ class Conversation {
   final int unreadCount;
   final String latestTimestamp;
   final bool isTyping;
+
+  Conversation copyWith({
+    String? id,
+    AppUser? friend,
+    List<Message>? messages,
+    Message? latestMessage,
+    int? unreadCount,
+    String? latestTimestamp,
+    bool? isTyping,
+  }) {
+    return Conversation(
+      id: id ?? this.id,
+      friend: friend ?? this.friend,
+      messages: messages ?? this.messages,
+      latestMessage: latestMessage ?? this.latestMessage,
+      unreadCount: unreadCount ?? this.unreadCount,
+      latestTimestamp: latestTimestamp ?? this.latestTimestamp,
+      isTyping: isTyping ?? this.isTyping,
+    );
+  }
 }

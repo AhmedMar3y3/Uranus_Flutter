@@ -58,7 +58,7 @@ class RemoteFriendsRepository implements FriendsRepository {
 
   @override
   Future<void> remove(String userId) =>
-      apiClient.delete('/friends/remove', body: {'user_id': userId});
+      apiClient.deleteVoid('/friends/remove', body: {'user_id': userId});
 
   @override
   Future<void> block(String userId) => _post('/friends/block', userId);
@@ -67,7 +67,7 @@ class RemoteFriendsRepository implements FriendsRepository {
   Future<void> unblock(String userId) => _post('/friends/unblock', userId);
 
   Future<void> _post(String path, String userId) async {
-    await apiClient.post(path, body: {'user_id': userId});
+    await apiClient.postVoid(path, body: {'user_id': userId});
   }
 
   List<FriendRequest> _requests(dynamic value, String userKey) {

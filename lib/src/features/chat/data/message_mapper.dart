@@ -1,3 +1,4 @@
+import '../../../core/network/api_config.dart';
 import '../../profile/data/user_mapper.dart';
 import '../domain/entities/message.dart';
 
@@ -63,7 +64,9 @@ class MessageMapper {
       name: value['name']?.toString() ?? 'Attachment',
       type: _kind(type),
       sizeLabel: _sizeLabel(value['size']),
-      previewUrl: value['url']?.toString(),
+      previewUrl: _url(
+        value['url'] ?? value['file_url'] ?? value['path'] ?? value['file_path'],
+      ),
       durationSeconds: value['duration_seconds'] is int
           ? value['duration_seconds'] as int
           : int.tryParse(value['duration_seconds']?.toString() ?? ''),
@@ -79,5 +82,17 @@ class MessageMapper {
       return '${(size / 1024).toStringAsFixed(0)} KB';
     }
     return '${(size / (1024 * 1024)).toStringAsFixed(1)} MB';
+  }
+
+  static String? _url(dynamic value) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    if (text.startsWith('http://') || text.startsWith('https://')) {
+      return text;
+    }
+    final path = text.startsWith('/') ? text : '/$text';
+    return '${ApiConfig.baseUrl}$path';
   }
 }

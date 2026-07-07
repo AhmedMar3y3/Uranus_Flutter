@@ -34,7 +34,9 @@ class _UserSearchScreenState extends State<UserSearchScreen> {
 
   Future<void> _refresh() async {
     final next = _loadCurrentQuery();
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {}

@@ -25,7 +25,9 @@ class _FriendRequestsScreenState extends State<FriendRequestsScreen> {
 
   Future<void> _refresh() async {
     final next = _loadRequests();
-    setState(() => _future = next);
+    setState(() {
+      _future = next;
+    });
     try {
       await next;
     } catch (_) {}

@@ -8,6 +8,7 @@ import '../features/chat/domain/repositories/chat_repository.dart';
 import '../features/friends/data/repositories/remote_friends_repository.dart';
 import '../features/friends/domain/repositories/friends_repository.dart';
 import '../features/notifications/data/notification_service.dart';
+import '../features/presence/data/presence_service.dart';
 import '../features/profile/data/repositories/remote_profile_repository.dart';
 import '../features/profile/domain/repositories/profile_repository.dart';
 
@@ -22,6 +23,11 @@ class AppDependencies {
   );
   static final pusherChatService = PusherChatService(
     sessionManager: sessionManager,
+  );
+  static final presenceService = PresenceService(
+    apiClient: apiClient,
+    sessionManager: sessionManager,
+    pusherChatService: pusherChatService,
   );
 
   static final AuthRepository authRepository = RemoteAuthRepository(

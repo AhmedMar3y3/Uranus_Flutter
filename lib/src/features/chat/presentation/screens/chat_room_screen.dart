@@ -9,11 +9,13 @@ import 'package:record/record.dart';
 
 import '../../../../app/app_dependencies.dart';
 import '../../../../core/network/error_messages.dart';
+import '../../../../core/platform/file_opener.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../shared/widgets/glass_panel.dart';
 import '../../../../shared/widgets/refreshable_placeholder.dart';
 import '../../../../shared/widgets/space_background.dart';
 import '../../../../shared/widgets/user_avatar.dart';
+import '../../../presence/data/presence_service.dart';
 import '../../domain/entities/conversation.dart';
 import '../../domain/entities/message.dart';
 import 'message_actions_sheet.dart';
@@ -66,6 +68,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   final _audioPlayer = AudioPlayer();
   final _messages = <Message>[];
   StreamSubscription<void>? _audioCompleteSubscription;
+  StreamSubscription<PresenceUpdate>? _presenceSubscription;
+  late AppUser _friend;
   Message? _replyTo;
   bool _isLoading = true;
   bool _isSending = false;
@@ -83,6 +87,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   @override
   void initState() {
     super.initState();
+    _friend = widget.conversation.friend;
+    _presenceSubscription = AppDependencies.presenceService.updates.listen(
+      _applyPresenceUpdate,
+    );
     _audioCompleteSubscription = _audioPlayer.onPlayerComplete.listen((_) {
       if (mounted) {
         setState(() => _playingMessageId = null);
@@ -104,6 +112,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _typingStopTimer?.cancel();
     _typingAutoHideTimer?.cancel();
     _messageController.removeListener(_handleTypingInput);
+    _presenceSubscription?.cancel();
     unawaited(_setTypingStatus(false, force: true));
     _recorder.dispose();
     _audioCompleteSubscription?.cancel();
@@ -283,7 +292,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _handleRemoteTypingChanged(String userId, bool isTyping) {
-    if (!mounted || userId != widget.conversation.friend.id) {
+    if (!mounted || userId != _friend.id) {
       return;
     }
 
@@ -402,6 +411,18 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     setState(() => _replyTo = null);
   }
 
+  void _applyPresenceUpdate(PresenceUpdate update) {
+    if (!mounted || update.userId != _friend.id) {
+      return;
+    }
+    setState(() {
+      _friend = _friend.copyWith(
+        isOnline: update.online,
+        lastSeen: update.lastSeen,
+      );
+    });
+  }
+
   Future<void> _toggleAudio(Message message) async {
     final url = message.attachment?.previewUrl;
     if (url == null || url.isEmpty) {
@@ -430,6 +451,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           readableError(error, fallback: 'Could not play this voice message.'),
         );
       }
+    }
+  }
+
+  Future<void> _openFileAttachment(Message message) async {
+    final url = message.attachment?.previewUrl;
+    if (url == null || url.isEmpty) {
+      _showSendError('File is not ready yet.');
+      return;
+    }
+    try {
+      await FileOpener.open(url);
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showSendError(
+        error is FileOpenException
+            ? error.message
+            : 'No app is available to open this file.',
+      );
     }
   }
 
@@ -754,33 +795,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _editMessage(Message message) async {
-    final controller = TextEditingController(text: message.body);
     final updatedBody = await showDialog<String>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: AppTheme.deepNavy,
-        title: const Text('Edit message'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          minLines: 1,
-          maxLines: 5,
-          decoration: const InputDecoration(hintText: 'Message'),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () =>
-                Navigator.of(dialogContext).pop(controller.text.trim()),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (_) => _EditMessageDialog(initialBody: message.body),
     );
-    controller.dispose();
 
     if (updatedBody == null ||
         updatedBody.isEmpty ||
@@ -916,7 +934,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final friend = widget.conversation.friend;
+    final friend = _friend;
 
     return Scaffold(
       extendBodyBehindAppBar: true,
@@ -1016,6 +1034,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                             message: message,
                             isAudioPlaying: _playingMessageId == message.id,
                             onAudioPressed: () => _toggleAudio(message),
+                            onOpenFile: () => _openFileAttachment(message),
                             onLongPress: () => _showMessageActions(message),
                             onSwipeReply: () => _setReplyTarget(message),
                           );
@@ -1043,11 +1062,62 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 }
 
-class _MessageBubble extends StatelessWidget {
+class _EditMessageDialog extends StatefulWidget {
+  const _EditMessageDialog({required this.initialBody});
+
+  final String initialBody;
+
+  @override
+  State<_EditMessageDialog> createState() => _EditMessageDialogState();
+}
+
+class _EditMessageDialogState extends State<_EditMessageDialog> {
+  late final TextEditingController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialBody);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.deepNavy,
+      title: const Text('Edit message'),
+      content: TextField(
+        controller: _controller,
+        autofocus: true,
+        minLines: 1,
+        maxLines: 5,
+        decoration: const InputDecoration(hintText: 'Message'),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
+          child: const Text('Save'),
+        ),
+      ],
+    );
+  }
+}
+
+class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.message,
     required this.isAudioPlaying,
     required this.onAudioPressed,
+    required this.onOpenFile,
     required this.onLongPress,
     required this.onSwipeReply,
   });
@@ -1055,11 +1125,45 @@ class _MessageBubble extends StatelessWidget {
   final Message message;
   final bool isAudioPlaying;
   final VoidCallback onAudioPressed;
+  final VoidCallback onOpenFile;
   final VoidCallback onLongPress;
   final VoidCallback onSwipeReply;
 
   @override
+  State<_MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<_MessageBubble> {
+  double _dragOffset = 0;
+
+  void _handleDragUpdate(DragUpdateDetails details) {
+    final delta = details.primaryDelta ?? 0;
+    final next = (_dragOffset + delta).clamp(0.0, 74.0).toDouble();
+    if (next == _dragOffset) {
+      return;
+    }
+    setState(() => _dragOffset = next);
+  }
+
+  void _handleDragEnd(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    final shouldReply = _dragOffset > 52 || velocity > 520;
+    setState(() => _dragOffset = 0);
+    if (shouldReply) {
+      widget.onSwipeReply();
+    }
+  }
+
+  void _handleDragCancel() {
+    if (_dragOffset == 0) {
+      return;
+    }
+    setState(() => _dragOffset = 0);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final message = widget.message;
     final alignment = message.isMine
         ? Alignment.centerRight
         : Alignment.centerLeft;
@@ -1079,70 +1183,111 @@ class _MessageBubble extends StatelessWidget {
     return Align(
       alignment: alignment,
       child: GestureDetector(
-        onLongPress: onLongPress,
-        onHorizontalDragEnd: (details) {
-          final velocity = details.primaryVelocity ?? 0;
-          if (velocity > 220) {
-            onSwipeReply();
-          }
-        },
-        child: Container(
-          constraints: BoxConstraints(maxWidth: maxWidth.clamp(220, 360)),
-          margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
-          decoration: BoxDecoration(
-            gradient: gradient,
-            color: color,
-            borderRadius: BorderRadius.only(
-              topLeft: const Radius.circular(12),
-              topRight: const Radius.circular(12),
-              bottomLeft: Radius.circular(message.isMine ? 12 : 3),
-              bottomRight: Radius.circular(message.isMine ? 3 : 12),
-            ),
-            border: Border.all(
-              color: message.isMine
-                  ? Colors.white.withValues(alpha: .22)
-                  : Colors.white.withValues(alpha: .08),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: (message.isMine ? AppTheme.cyan : Colors.black)
-                    .withValues(alpha: message.isMine ? .12 : .18),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (message.replyTo != null) ...[
-                _ReplyPreview(message: message.replyTo!, textColor: textColor),
-                const SizedBox(height: 8),
-              ],
-              if (message.kind == MessageKind.image)
-                _ImageAttachment(message: message, textColor: textColor),
-              if (message.kind == MessageKind.file)
-                _FileAttachment(message: message, textColor: textColor),
-              if (message.kind == MessageKind.audio)
-                _AudioAttachment(
-                  message: message,
-                  textColor: textColor,
-                  isPlaying: isAudioPlaying,
-                  onPressed: onAudioPressed,
-                ),
-              if (message.kind == MessageKind.text)
-                Text(message.body, style: TextStyle(color: textColor)),
-              const SizedBox(height: 7),
-              Text(
-                '${message.sentAt} - ${_deliveryLabel(message.delivery)}${message.isEdited ? ' - edited' : ''}',
-                style: TextStyle(
-                  color: textColor.withValues(alpha: .72),
-                  fontSize: 11,
+        onLongPress: widget.onLongPress,
+        onHorizontalDragUpdate: _handleDragUpdate,
+        onHorizontalDragEnd: _handleDragEnd,
+        onHorizontalDragCancel: _handleDragCancel,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.centerLeft,
+          children: [
+            Positioned(
+              left: 14,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 120),
+                opacity: _dragOffset > 8 ? 1 : 0,
+                child: Transform.scale(
+                  scale: 0.82 + (_dragOffset / 74 * .18),
+                  child: Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: AppTheme.cyan.withValues(alpha: .18),
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: AppTheme.cyan.withValues(alpha: .35),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.reply_rounded,
+                      color: AppTheme.cyan,
+                      size: 20,
+                    ),
+                  ),
                 ),
               ),
-            ],
-          ),
+            ),
+            AnimatedContainer(
+              duration: _dragOffset == 0
+                  ? const Duration(milliseconds: 180)
+                  : Duration.zero,
+              curve: Curves.easeOutCubic,
+              transform: Matrix4.translationValues(_dragOffset, 0, 0),
+              constraints: BoxConstraints(maxWidth: maxWidth.clamp(220, 360)),
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 11),
+              decoration: BoxDecoration(
+                gradient: gradient,
+                color: color,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(12),
+                  topRight: const Radius.circular(12),
+                  bottomLeft: Radius.circular(message.isMine ? 12 : 3),
+                  bottomRight: Radius.circular(message.isMine ? 3 : 12),
+                ),
+                border: Border.all(
+                  color: message.isMine
+                      ? Colors.white.withValues(alpha: .22)
+                      : Colors.white.withValues(alpha: .08),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: (message.isMine ? AppTheme.cyan : Colors.black)
+                        .withValues(alpha: message.isMine ? .12 : .18),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (message.replyTo != null) ...[
+                    _ReplyPreview(
+                      message: message.replyTo!,
+                      textColor: textColor,
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  if (message.kind == MessageKind.image)
+                    _ImageAttachment(message: message, textColor: textColor),
+                  if (message.kind == MessageKind.file)
+                    _FileAttachment(
+                      message: message,
+                      textColor: textColor,
+                      onOpen: widget.onOpenFile,
+                    ),
+                  if (message.kind == MessageKind.audio)
+                    _AudioAttachment(
+                      message: message,
+                      textColor: textColor,
+                      isPlaying: widget.isAudioPlaying,
+                      onPressed: widget.onAudioPressed,
+                    ),
+                  if (message.kind == MessageKind.text)
+                    Text(message.body, style: TextStyle(color: textColor)),
+                  const SizedBox(height: 7),
+                  Text(
+                    '${message.sentAt} - ${_deliveryLabel(message.delivery)}${message.isEdited ? ' - edited' : ''}',
+                    style: TextStyle(
+                      color: textColor.withValues(alpha: .72),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -1223,39 +1368,57 @@ class _ImageAttachment extends StatelessWidget {
 }
 
 class _FileAttachment extends StatelessWidget {
-  const _FileAttachment({required this.message, required this.textColor});
+  const _FileAttachment({
+    required this.message,
+    required this.textColor,
+    required this.onOpen,
+  });
 
   final Message message;
   final Color textColor;
+  final VoidCallback onOpen;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(Icons.insert_drive_file_outlined, color: textColor),
-        const SizedBox(width: 10),
-        Flexible(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                message.attachment?.name ?? 'Attachment',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: textColor, fontWeight: FontWeight.w800),
-              ),
-              Text(
-                message.attachment?.sizeLabel ?? '',
-                style: TextStyle(
-                  color: textColor.withValues(alpha: .7),
-                  fontSize: 12,
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onOpen,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.insert_drive_file_outlined, color: textColor),
+          const SizedBox(width: 10),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.attachment?.name ?? 'Attachment',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: textColor,
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
-              ),
-            ],
+                Text(
+                  message.attachment?.sizeLabel ?? 'Tap to open',
+                  style: TextStyle(
+                    color: textColor.withValues(alpha: .7),
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-      ],
+          const SizedBox(width: 10),
+          Icon(
+            Icons.open_in_new_rounded,
+            color: textColor.withValues(alpha: .78),
+            size: 18,
+          ),
+        ],
+      ),
     );
   }
 }
