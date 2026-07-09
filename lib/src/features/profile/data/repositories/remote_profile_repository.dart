@@ -1,5 +1,6 @@
 import '../../../../core/network/api_client.dart';
 import '../../../../core/session/session_manager.dart';
+import '../../../e2ee/data/e2ee_service.dart';
 import '../../domain/entities/app_user.dart';
 import '../../domain/repositories/profile_repository.dart';
 import '../user_mapper.dart';
@@ -8,10 +9,12 @@ class RemoteProfileRepository implements ProfileRepository {
   const RemoteProfileRepository({
     required this.apiClient,
     required this.sessionManager,
+    required this.e2eeService,
   });
 
   final ApiClient apiClient;
   final SessionManager sessionManager;
+  final E2eeService e2eeService;
 
   @override
   Future<AppUser> getCurrentUser() async {
@@ -54,8 +57,14 @@ class RemoteProfileRepository implements ProfileRepository {
         'full_name': fullName,
         'gender': gender.name,
         'bio': bio,
+        'public_key': await e2eeService.publicKey(),
       },
     );
+    try {
+      await e2eeService.ensureKeyPairUploaded();
+    } catch (_) {
+      // The multipart request already sent the public key; retry later if needed.
+    }
     await sessionManager.markProfileCompleted();
     final user = UserMapper.fromJson(json['user'] as Map<String, dynamic>);
     await sessionManager.saveUserIdentity(id: user.id, username: user.username);
@@ -83,12 +92,18 @@ class RemoteProfileRepository implements ProfileRepository {
     if (bio != null) {
       fields['bio'] = bio;
     }
+    fields['public_key'] = await e2eeService.publicKey();
 
     final json = await apiClient.multipart(
       '/profile/update',
       fields: fields,
       filePaths: imagePath == null ? null : {'image': imagePath},
     );
+    try {
+      await e2eeService.ensureKeyPairUploaded();
+    } catch (_) {
+      // The multipart request already sent the public key; retry later if needed.
+    }
     final user = UserMapper.fromJson(json['user'] as Map<String, dynamic>);
     await sessionManager.saveUserIdentity(id: user.id, username: user.username);
     return user;

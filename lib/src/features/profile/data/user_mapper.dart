@@ -32,6 +32,8 @@ class UserMapper {
         json['friendship_status']?.toString(),
       ),
       completedProfile: json['completed_profile'] as bool? ?? true,
+      publicKey: _nonEmpty(json['public_key']),
+      keyId: _nonEmpty(json['key_id']) ?? 'default',
     );
   }
 
@@ -98,5 +100,13 @@ class UserMapper {
     }
     final path = text.startsWith('/') ? text : '/$text';
     return '${ApiConfig.baseUrl}$path';
+  }
+
+  static String? _nonEmpty(dynamic value) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    return text;
   }
 }

@@ -4,6 +4,8 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
+import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -25,8 +27,17 @@ class MainActivity : FlutterActivity() {
                 return@setMethodCallHandler
             }
 
-            val uri = Uri.parse(url)
-            val mimeType = call.argument<String>("mimeType") ?: mimeTypeFor(uri)
+            val parsedUri = Uri.parse(url)
+            val uri = if (parsedUri.scheme == "file") {
+                FileProvider.getUriForFile(
+                    this,
+                    "${applicationContext.packageName}.fileprovider",
+                    File(parsedUri.path ?: "")
+                )
+            } else {
+                parsedUri
+            }
+            val mimeType = call.argument<String>("mimeType") ?: mimeTypeFor(parsedUri)
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mimeType)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

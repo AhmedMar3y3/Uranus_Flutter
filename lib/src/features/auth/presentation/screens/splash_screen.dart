@@ -30,6 +30,7 @@ class _SplashScreenState extends State<SplashScreen> {
           unawaited(
             AppDependencies.notificationService.registerTokenIfAuthenticated(),
           );
+          unawaited(AppDependencies.e2eeService.ensureKeyPairUploaded());
           unawaited(AppDependencies.presenceService.startForegroundSession());
         }
         if (!mounted) {

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
@@ -62,11 +63,16 @@ class ChatRoomScreen extends StatefulWidget {
 }
 
 class _ChatRoomScreenState extends State<ChatRoomScreen> {
+  static const _messagesPerPage = 30;
+
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   final _recorder = AudioRecorder();
   final _audioPlayer = AudioPlayer();
   final _messages = <Message>[];
+  final _imageBytesCache = <String, Future<Uint8List>>{};
+  final _attachmentPathCache = <String, Future<String>>{};
+  final _messageKeys = <String, GlobalKey>{};
   StreamSubscription<void>? _audioCompleteSubscription;
   StreamSubscription<PresenceUpdate>? _presenceSubscription;
   late AppUser _friend;
@@ -83,11 +89,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   String? _recordingPath;
   String? _playingMessageId;
   String? _error;
+  int? _nextMessagesPage = 1;
+  bool _hasMoreMessages = true;
+  bool _isLoadingOlderMessages = false;
+
+  bool get _encryptedChatUnavailable =>
+      widget.conversation.id.isNotEmpty &&
+      (_friend.publicKey == null || _friend.publicKey!.isEmpty);
 
   @override
   void initState() {
     super.initState();
     _friend = widget.conversation.friend;
+    if (widget.conversation.messages.isNotEmpty) {
+      _messages.addAll(widget.conversation.messages);
+      _sortMessages();
+      _isLoading = false;
+    }
     _presenceSubscription = AppDependencies.presenceService.updates.listen(
       _applyPresenceUpdate,
     );
@@ -96,8 +114,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         setState(() => _playingMessageId = null);
       }
     });
+    _scrollController.addListener(_handleMessageScroll);
     _messageController.addListener(_handleTypingInput);
-    _loadMessages();
+    unawaited(_loadCachedMessages());
+    _loadMessages(showLoading: _messages.isEmpty);
     unawaited(_subscribeLiveMessages());
   }
 
@@ -117,6 +137,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     _recorder.dispose();
     _audioCompleteSubscription?.cancel();
     _audioPlayer.dispose();
+    _imageBytesCache.clear();
+    _attachmentPathCache.clear();
+    _messageKeys.clear();
+    _scrollController.removeListener(_handleMessageScroll);
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -146,43 +170,143 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _upsertLiveMessage(Message message) {
+    unawaited(_decryptAndUpsertLiveMessage(message));
+  }
+
+  Future<void> _decryptAndUpsertLiveMessage(Message message) async {
     if (!mounted) {
       return;
     }
-    final index = _messages.indexWhere((item) => item.id == message.id);
-    setState(() {
-      if (index == -1) {
-        _messages.add(message);
-      } else {
-        _messages[index] = message.copyWith(
-          isMine: _messages[index].isMine || message.isMine,
-        );
-      }
-    });
-    if (!message.isMine) {
-      unawaited(_acknowledgeIncomingMessages([message]));
+    final decrypted = await AppDependencies.e2eeService.decryptMessage(
+      message: message,
+      friend: _friend,
+    );
+    if (!mounted) {
+      return;
     }
+    setState(() {
+      _upsertMessage(decrypted);
+    });
+    if (!decrypted.isMine) {
+      unawaited(_acknowledgeIncomingMessages([decrypted]));
+    }
+    _cacheCurrentMessages();
     _scrollToLatest();
   }
 
+  void _upsertMessage(Message message) {
+    final existingIndex = _messages.indexWhere((item) => item.id == message.id);
+    if (existingIndex != -1) {
+      _messages[existingIndex] = message.copyWith(
+        isMine: _messages[existingIndex].isMine || message.isMine,
+      );
+      _removeDuplicateServerMessages(message.id, keepIndex: existingIndex);
+      return;
+    }
+
+    final pendingIndex = _messages.indexWhere(
+      (item) => _matchesPendingMessage(item, message),
+    );
+    if (pendingIndex != -1) {
+      _messages[pendingIndex] = message.copyWith(isMine: true);
+      _removeDuplicateServerMessages(message.id, keepIndex: pendingIndex);
+      return;
+    }
+
+    _messages.add(message);
+    _sortMessages();
+  }
+
+  bool _matchesPendingMessage(Message pending, Message sent) {
+    if (!pending.id.startsWith('local-') ||
+        !pending.isMine ||
+        !sent.isMine ||
+        pending.kind != sent.kind) {
+      return false;
+    }
+    final pendingReplyId = pending.replyTo?.id;
+    final sentReplyId = sent.replyTo?.id;
+    if (pendingReplyId != sentReplyId) {
+      return false;
+    }
+    if (pending.kind == MessageKind.text) {
+      return pending.body.trim() == sent.body.trim();
+    }
+    final pendingAttachment = pending.attachment;
+    final sentAttachment = sent.attachment;
+    return pendingAttachment?.name == sentAttachment?.name ||
+        (pending.kind == MessageKind.audio &&
+            pendingAttachment?.durationSeconds ==
+                sentAttachment?.durationSeconds);
+  }
+
+  void _replacePendingMessage(String localId, Message sent) {
+    final index = _messages.indexWhere((message) => message.id == localId);
+    if (index == -1) {
+      _upsertMessage(sent);
+      return;
+    }
+    _messages[index] = sent.copyWith(isMine: true);
+    _removeDuplicateServerMessages(sent.id, keepIndex: index);
+  }
+
+  void _removeDuplicateServerMessages(String messageId, {required int keepIndex}) {
+    for (var i = _messages.length - 1; i >= 0; i--) {
+      if (i != keepIndex && _messages[i].id == messageId) {
+        _messages.removeAt(i);
+      }
+    }
+    _sortMessages();
+  }
+
+  void _sortMessages() {
+    _messages.sort((a, b) {
+      final byTime = a.sortKey.compareTo(b.sortKey);
+      if (byTime != 0) {
+        return byTime;
+      }
+      final aId = int.tryParse(a.id);
+      final bId = int.tryParse(b.id);
+      if (aId != null && bId != null) {
+        return aId.compareTo(bId);
+      }
+      return a.id.compareTo(b.id);
+    });
+  }
+
   void _mergeLiveMessageEdit(Message message) {
+    unawaited(_decryptAndMergeLiveMessageEdit(message));
+  }
+
+  Future<void> _decryptAndMergeLiveMessageEdit(Message message) async {
     if (!mounted) {
       return;
     }
-    final index = _messages.indexWhere((item) => item.id == message.id);
+    final decrypted = await AppDependencies.e2eeService.decryptMessage(
+      message: message,
+      friend: _friend,
+    );
+    if (!mounted) {
+      return;
+    }
+    final index = _messages.indexWhere((item) => item.id == decrypted.id);
     setState(() {
       if (index == -1) {
-        _messages.add(message);
+        _messages.add(decrypted);
       } else {
         final existing = _messages[index];
         _messages[index] = existing.copyWith(
-          body: message.body.isEmpty ? existing.body : message.body,
-          attachment: message.attachment ?? existing.attachment,
-          replyTo: message.replyTo ?? existing.replyTo,
+          body: decrypted.body.isEmpty ? existing.body : decrypted.body,
+          attachment: decrypted.attachment ?? existing.attachment,
+          replyTo: decrypted.replyTo ?? existing.replyTo,
+          ciphertext: decrypted.ciphertext,
+          nonce: decrypted.nonce,
           isEdited: true,
         );
       }
+      _sortMessages();
     });
+    _cacheCurrentMessages();
   }
 
   void _removeLiveMessage(String messageId) {
@@ -194,6 +318,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
     setState(() {
       _messages.removeWhere((message) => message.id == messageId);
+      _messageKeys.remove(messageId);
       if (_replyTo?.id == messageId) {
         _replyTo = null;
       }
@@ -201,6 +326,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         _playingMessageId = null;
       }
     });
+    _cacheCurrentMessages();
   }
 
   Future<void> _acknowledgeIncomingMessages(List<Message> messages) async {
@@ -310,15 +436,23 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     setState(() => _friendIsTyping = false);
   }
 
-  Future<void> _loadMessages() async {
+  Future<void> _loadMessages({bool showLoading = false}) async {
     setState(() {
-      _isLoading = true;
+      if (showLoading) {
+        _isLoading = true;
+      }
       _error = null;
     });
 
     try {
-      final messages = await AppDependencies.chatRepository.getMessages(
-        widget.conversation.id,
+      final page = await AppDependencies.chatRepository.getMessagePage(
+        conversationId: widget.conversation.id,
+        page: 1,
+        perPage: _messagesPerPage,
+      );
+      final messages = await AppDependencies.e2eeService.decryptMessages(
+        messages: page.messages,
+        friend: _friend,
       );
       if (!mounted) {
         return;
@@ -327,9 +461,13 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         _messages
           ..clear()
           ..addAll(messages);
+        _sortMessages();
+        _nextMessagesPage = page.nextPage;
+        _hasMoreMessages = page.hasMore;
         _isLoading = false;
       });
       unawaited(_acknowledgeIncomingMessages(messages));
+      _cacheCurrentMessages();
       _scrollToLatest();
     } catch (error) {
       if (!mounted) {
@@ -339,6 +477,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
         _messages
           ..clear()
           ..addAll(widget.conversation.messages);
+        _sortMessages();
+        _nextMessagesPage = null;
+        _hasMoreMessages = false;
         _isLoading = false;
         _error = readableError(
           error,
@@ -346,6 +487,126 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               'Could not load messages. Showing available conversation data.',
         );
       });
+    }
+  }
+
+  Future<void> _loadCachedMessages() async {
+    final cached = await AppDependencies.messageCache.getMessages(
+      widget.conversation.id,
+    );
+    if (!mounted || cached.isEmpty) {
+      return;
+    }
+    setState(() {
+      for (final message in cached) {
+        final existingIndex = _messages.indexWhere(
+          (item) => item.id == message.id,
+        );
+        if (existingIndex == -1) {
+          _messages.add(message);
+        }
+      }
+      _sortMessages();
+      _isLoading = false;
+    });
+    _scrollToLatest();
+  }
+
+  void _cacheCurrentMessages() {
+    unawaited(
+      AppDependencies.messageCache.saveMessages(
+        widget.conversation.id,
+        _messages,
+      ),
+    );
+  }
+
+  void _handleMessageScroll() {
+    if (!_scrollController.hasClients ||
+        _isLoading ||
+        _isLoadingOlderMessages ||
+        !_hasMoreMessages) {
+      return;
+    }
+    if (_scrollController.position.pixels <= 140) {
+      unawaited(_loadOlderMessages());
+    }
+  }
+
+  Future<bool> _loadOlderMessages({bool preserveScroll = true}) async {
+    final pageNumber = _nextMessagesPage;
+    if (pageNumber == null ||
+        _isLoadingOlderMessages ||
+        _isLoading ||
+        !_hasMoreMessages) {
+      return false;
+    }
+
+    final beforeMaxExtent = _scrollController.hasClients
+        ? _scrollController.position.maxScrollExtent
+        : 0.0;
+    final beforeOffset = _scrollController.hasClients
+        ? _scrollController.offset
+        : 0.0;
+
+    setState(() {
+      _isLoadingOlderMessages = true;
+      _error = null;
+    });
+
+    try {
+      final page = await AppDependencies.chatRepository.getMessagePage(
+        conversationId: widget.conversation.id,
+        page: pageNumber,
+        perPage: _messagesPerPage,
+      );
+      final messages = await AppDependencies.e2eeService.decryptMessages(
+        messages: page.messages,
+        friend: _friend,
+      );
+      if (!mounted) {
+        return false;
+      }
+
+      setState(() {
+        for (final message in messages) {
+          _upsertMessage(message);
+        }
+        _nextMessagesPage = page.nextPage;
+        _hasMoreMessages = page.hasMore;
+        _isLoadingOlderMessages = false;
+      });
+      unawaited(_acknowledgeIncomingMessages(messages));
+      _cacheCurrentMessages();
+
+      if (preserveScroll) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!_scrollController.hasClients) {
+            return;
+          }
+          final addedExtent =
+              _scrollController.position.maxScrollExtent - beforeMaxExtent;
+          _scrollController.jumpTo(
+            (beforeOffset + addedExtent).clamp(
+              0.0,
+              _scrollController.position.maxScrollExtent,
+            ).toDouble(),
+          );
+        });
+      }
+      return messages.isNotEmpty;
+    } catch (error) {
+      if (!mounted) {
+        return false;
+      }
+      setState(() {
+        _isLoadingOlderMessages = false;
+        _error = readableError(
+          error,
+          fallback: 'Could not load older messages. Pull to refresh and retry.',
+        );
+      });
+      return false;
     }
   }
 
@@ -411,6 +672,60 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     setState(() => _replyTo = null);
   }
 
+  GlobalKey _keyForMessage(String messageId) {
+    return _messageKeys.putIfAbsent(messageId, GlobalKey.new);
+  }
+
+  Future<void> _scrollToMessage(String messageId) async {
+    if (messageId.isEmpty) {
+      return;
+    }
+    final context = _messageKeys[messageId]?.currentContext;
+    if (context != null) {
+      await Scrollable.ensureVisible(
+        context,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        alignment: .28,
+      );
+      return;
+    }
+
+    var index = _messages.indexWhere((message) => message.id == messageId);
+    while (index == -1 && _hasMoreMessages) {
+      final loaded = await _loadOlderMessages(preserveScroll: false);
+      if (!loaded) {
+        break;
+      }
+      index = _messages.indexWhere((message) => message.id == messageId);
+    }
+
+    if (index == -1 || !_scrollController.hasClients) {
+      _showSendError('Original message is not loaded in this chat.');
+      return;
+    }
+    final target = (index * 112.0).clamp(
+      0.0,
+      _scrollController.position.maxScrollExtent,
+    ).toDouble();
+    await _scrollController.animateTo(
+      target,
+      duration: const Duration(milliseconds: 260),
+      curve: Curves.easeOutCubic,
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nextContext = _messageKeys[messageId]?.currentContext;
+      if (nextContext != null) {
+        Scrollable.ensureVisible(
+          nextContext,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOutCubic,
+          alignment: .28,
+        );
+      }
+    });
+  }
+
   void _applyPresenceUpdate(PresenceUpdate update) {
     if (!mounted || update.userId != _friend.id) {
       return;
@@ -424,8 +739,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _toggleAudio(Message message) async {
-    final url = message.attachment?.previewUrl;
-    if (url == null || url.isEmpty) {
+    if (message.attachment?.previewUrl == null ||
+        message.attachment!.previewUrl!.isEmpty) {
       _showSendError('Audio is not ready yet.');
       return;
     }
@@ -443,7 +758,8 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       if (mounted) {
         setState(() => _playingMessageId = message.id);
       }
-      await _audioPlayer.play(UrlSource(url));
+      final path = await _decryptedAttachmentPath(message);
+      await _audioPlayer.play(DeviceFileSource(path));
     } catch (error) {
       if (mounted) {
         setState(() => _playingMessageId = null);
@@ -455,13 +771,14 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   Future<void> _openFileAttachment(Message message) async {
-    final url = message.attachment?.previewUrl;
-    if (url == null || url.isEmpty) {
+    if (message.attachment?.previewUrl == null ||
+        message.attachment!.previewUrl!.isEmpty) {
       _showSendError('File is not ready yet.');
       return;
     }
     try {
-      await FileOpener.open(url);
+      final path = await _decryptedAttachmentPath(message);
+      await FileOpener.open(Uri.file(path).toString());
     } catch (error) {
       if (!mounted) {
         return;
@@ -472,6 +789,37 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             : 'No app is available to open this file.',
       );
     }
+  }
+
+  Future<String> _decryptedAttachmentPath(Message message) {
+    return _attachmentPathCache.putIfAbsent(
+      _attachmentCacheKey(message),
+      () => AppDependencies.e2eeService.decryptAttachmentToTemporaryFile(
+        message: message,
+        friend: _friend,
+      ),
+    );
+  }
+
+  Future<Uint8List> _decryptedImageBytes(Message message) {
+    return _imageBytesCache.putIfAbsent(
+      _attachmentCacheKey(message),
+      () async {
+        final bytes = await AppDependencies.e2eeService.decryptAttachmentBytes(
+          message: message,
+          friend: _friend,
+        );
+        return Uint8List.fromList(bytes);
+      },
+    );
+  }
+
+  String _attachmentCacheKey(Message message) {
+    return [
+      message.id,
+      message.attachment?.previewUrl ?? '',
+      message.attachment?.fileNonce ?? '',
+    ].join('|');
   }
 
   Future<void> _sendAttachmentFromPath({
@@ -492,9 +840,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       id: localId,
       conversationId: widget.conversation.id,
       senderId: 'me',
+      receiverId: _friend.id,
       body: '',
       sentAt: _timeLabel(),
       isMine: true,
+      sortKey: DateTime.now().millisecondsSinceEpoch,
       kind: type,
       delivery: MessageDelivery.sending,
       attachment: MessageAttachment(
@@ -516,18 +866,19 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     try {
       final sent = await AppDependencies.chatRepository.sendAttachmentMessage(
         conversationId: widget.conversation.id,
+        receiver: _friend,
         type: type,
         filePath: path,
+        fileName: name,
+        fileSize: sizeBytes,
         replyToMessageId: replyTo?.id,
         durationSeconds: durationSeconds,
       );
       if (!mounted) {
         return;
       }
-      final index = _messages.indexWhere((message) => message.id == localId);
-      if (index != -1) {
-        setState(() => _messages[index] = sent.copyWith(isMine: true));
-      }
+      setState(() => _replacePendingMessage(localId, sent));
+      _cacheCurrentMessages();
     } catch (error) {
       if (!mounted) {
         return;
@@ -549,6 +900,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   Future<void> _sendPickedAttachment(MessageKind type) async {
     if (widget.conversation.id.isEmpty) {
       _showSendError('Open a real conversation before sending attachments.');
+      return;
+    }
+    if (_encryptedChatUnavailable) {
+      _showEncryptedChatUnavailable();
       return;
     }
     final result = await picker.FilePicker.pickFiles(
@@ -579,6 +934,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     }
     if (widget.conversation.id.isEmpty) {
       _showSendError('Open a real conversation before recording.');
+      return;
+    }
+    if (_encryptedChatUnavailable) {
+      _showEncryptedChatUnavailable();
       return;
     }
     try {
@@ -684,6 +1043,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       _showSendError('Open a real conversation before sending messages.');
       return;
     }
+    if (_encryptedChatUnavailable) {
+      _showEncryptedChatUnavailable();
+      return;
+    }
 
     _messageController.clear();
     _typingStopTimer?.cancel();
@@ -694,9 +1057,11 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
       id: localId,
       conversationId: widget.conversation.id,
       senderId: 'me',
+      receiverId: _friend.id,
       body: body,
       sentAt: _timeLabel(),
       isMine: true,
+      sortKey: DateTime.now().millisecondsSinceEpoch,
       delivery: MessageDelivery.sending,
       replyTo: replyTo,
     );
@@ -711,16 +1076,15 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     try {
       final sent = await AppDependencies.chatRepository.sendTextMessage(
         conversationId: widget.conversation.id,
+        receiver: _friend,
         body: body,
         replyToMessageId: replyTo?.id,
       );
       if (!mounted) {
         return;
       }
-      final index = _messages.indexWhere((message) => message.id == localId);
-      if (index != -1) {
-        setState(() => _messages[index] = sent.copyWith(isMine: true));
-      }
+      setState(() => _replacePendingMessage(localId, sent));
+      _cacheCurrentMessages();
     } catch (error) {
       if (!mounted) {
         return;
@@ -810,6 +1174,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
     try {
       final edited = await AppDependencies.chatRepository.editMessage(
         conversationId: widget.conversation.id,
+        receiver: _friend,
         messageId: message.id,
         body: updatedBody,
       );
@@ -825,6 +1190,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             isEdited: true,
           );
         });
+        _cacheCurrentMessages();
       }
     } catch (error) {
       if (!mounted) {
@@ -881,6 +1247,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
           _playingMessageId = null;
         }
       });
+      _cacheCurrentMessages();
     } catch (error) {
       if (!mounted) {
         return;
@@ -892,6 +1259,10 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
   }
 
   void _showAttachmentSheet() {
+    if (_encryptedChatUnavailable) {
+      _showEncryptedChatUnavailable();
+      return;
+    }
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppTheme.deepNavy,
@@ -928,6 +1299,26 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _showEncryptedChatUnavailable() {
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: AppTheme.deepNavy,
+        icon: const Icon(Icons.lock_clock_outlined, color: AppTheme.cyan),
+        title: const Text('Encrypted chat is not ready'),
+        content: Text(
+          '${_friend.fullName} needs to update the app before encrypted chat is available.',
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
       ),
     );
   }
@@ -981,7 +1372,7 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       icon: Icons.cloud_off_outlined,
                       title: 'Could not load messages',
                       body: _error!,
-                      onRefresh: _loadMessages,
+                      onRefresh: () => _loadMessages(),
                     )
                   : _messages.isEmpty
                   ? RefreshablePlaceholder(
@@ -989,15 +1380,20 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                       title: 'No messages yet',
                       body:
                           'Send the first message to start this conversation.',
-                      onRefresh: _loadMessages,
+                      onRefresh: () => _loadMessages(),
                     )
                   : RefreshIndicator(
-                      onRefresh: _loadMessages,
+                      onRefresh: () => _loadMessages(),
                       child: ListView.builder(
                         controller: _scrollController,
                         padding: const EdgeInsets.fromLTRB(18, 96, 18, 14),
-                        itemCount: _messages.length + (_error == null ? 1 : 2),
+                        itemCount:
+                            _messages.length +
+                            1 +
+                            (_error == null ? 0 : 1) +
+                            (_isLoadingOlderMessages ? 1 : 0),
                         itemBuilder: (context, index) {
+                          var rowIndex = index;
                           if (_error != null && index == 0) {
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 10),
@@ -1011,8 +1407,27 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                               ),
                             );
                           }
-                          final offset = _error == null ? 0 : 1;
-                          if (index == offset) {
+                          if (_error != null) {
+                            rowIndex -= 1;
+                          }
+                          if (_isLoadingOlderMessages && rowIndex == 0) {
+                            return const Padding(
+                              padding: EdgeInsets.only(bottom: 10),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          if (_isLoadingOlderMessages) {
+                            rowIndex -= 1;
+                          }
+                          if (rowIndex == 0) {
                             return Center(
                               child: GlassPanel(
                                 padding: const EdgeInsets.symmetric(
@@ -1029,14 +1444,22 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
                               ),
                             );
                           }
-                          final message = _messages[index - offset - 1];
-                          return _MessageBubble(
-                            message: message,
-                            isAudioPlaying: _playingMessageId == message.id,
-                            onAudioPressed: () => _toggleAudio(message),
-                            onOpenFile: () => _openFileAttachment(message),
-                            onLongPress: () => _showMessageActions(message),
-                            onSwipeReply: () => _setReplyTarget(message),
+                          final message = _messages[rowIndex - 1];
+                          return KeyedSubtree(
+                            key: _keyForMessage(message.id),
+                            child: _MessageBubble(
+                              message: message,
+                              imageBytesFuture:
+                                  message.kind == MessageKind.image
+                                  ? _decryptedImageBytes(message)
+                                  : null,
+                              isAudioPlaying: _playingMessageId == message.id,
+                              onAudioPressed: () => _toggleAudio(message),
+                              onOpenFile: () => _openFileAttachment(message),
+                              onLongPress: () => _showMessageActions(message),
+                              onSwipeReply: () => _setReplyTarget(message),
+                              onReplyTap: _scrollToMessage,
+                            ),
                           );
                         },
                       ),
@@ -1048,6 +1471,9 @@ class _ChatRoomScreenState extends State<ChatRoomScreen> {
               isSending: _isSending,
               isRecording: _isRecording,
               recordSeconds: _recordSeconds,
+              encryptionUnavailable: _encryptedChatUnavailable,
+              encryptionUnavailableText:
+                  '${friend.fullName} needs to update the app before encrypted chat is available.',
               onSend: _sendText,
               onAttach: _showAttachmentSheet,
               onRecord: _startRecording,
@@ -1115,19 +1541,23 @@ class _EditMessageDialogState extends State<_EditMessageDialog> {
 class _MessageBubble extends StatefulWidget {
   const _MessageBubble({
     required this.message,
+    required this.imageBytesFuture,
     required this.isAudioPlaying,
     required this.onAudioPressed,
     required this.onOpenFile,
     required this.onLongPress,
     required this.onSwipeReply,
+    required this.onReplyTap,
   });
 
   final Message message;
+  final Future<Uint8List>? imageBytesFuture;
   final bool isAudioPlaying;
   final VoidCallback onAudioPressed;
   final VoidCallback onOpenFile;
   final VoidCallback onLongPress;
   final VoidCallback onSwipeReply;
+  final ValueChanged<String> onReplyTap;
 
   @override
   State<_MessageBubble> createState() => _MessageBubbleState();
@@ -1256,11 +1686,16 @@ class _MessageBubbleState extends State<_MessageBubble> {
                     _ReplyPreview(
                       message: message.replyTo!,
                       textColor: textColor,
+                      onTap: () => widget.onReplyTap(message.replyTo!.id),
                     ),
                     const SizedBox(height: 8),
                   ],
                   if (message.kind == MessageKind.image)
-                    _ImageAttachment(message: message, textColor: textColor),
+                    _ImageAttachment(
+                      message: message,
+                      imageBytesFuture: widget.imageBytesFuture!,
+                      textColor: textColor,
+                    ),
                   if (message.kind == MessageKind.file)
                     _FileAttachment(
                       message: message,
@@ -1305,64 +1740,140 @@ class _MessageBubbleState extends State<_MessageBubble> {
 }
 
 class _ReplyPreview extends StatelessWidget {
-  const _ReplyPreview({required this.message, required this.textColor});
+  const _ReplyPreview({
+    required this.message,
+    required this.textColor,
+    required this.onTap,
+  });
 
   final Message message;
   final Color textColor;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: .16),
-        borderRadius: BorderRadius.circular(8),
-        border: Border(
-          left: BorderSide(color: textColor.withValues(alpha: .65), width: 3),
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: .16),
+          borderRadius: BorderRadius.circular(8),
+          border: Border(
+            left: BorderSide(color: textColor.withValues(alpha: .65), width: 3),
+          ),
         ),
-      ),
-      child: Text(
-        _messagePreview(message),
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: textColor.withValues(alpha: .82),
-          fontSize: 12,
-          fontWeight: FontWeight.w700,
+        child: Text(
+          _messagePreview(message),
+          maxLines: 2,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: textColor.withValues(alpha: .82),
+            fontSize: 12,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
   }
 }
 
-class _ImageAttachment extends StatelessWidget {
-  const _ImageAttachment({required this.message, required this.textColor});
+class _ImageAttachment extends StatefulWidget {
+  const _ImageAttachment({
+    required this.message,
+    required this.imageBytesFuture,
+    required this.textColor,
+  });
 
   final Message message;
+  final Future<Uint8List> imageBytesFuture;
   final Color textColor;
 
   @override
+  State<_ImageAttachment> createState() => _ImageAttachmentState();
+}
+
+class _ImageAttachmentState extends State<_ImageAttachment> {
+  late Future<Uint8List> _imageBytesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _imageBytesFuture = widget.imageBytesFuture;
+  }
+
+  @override
+  void didUpdateWidget(covariant _ImageAttachment oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.message.id != widget.message.id ||
+        oldWidget.message.attachment?.fileNonce !=
+            widget.message.attachment?.fileNonce ||
+        oldWidget.message.attachment?.previewUrl !=
+            widget.message.attachment?.previewUrl ||
+        oldWidget.imageBytesFuture != widget.imageBytesFuture) {
+      _imageBytesFuture = widget.imageBytesFuture;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final url = message.attachment?.previewUrl;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: url == null
-              ? Container(
+          child: FutureBuilder<Uint8List>(
+            future: _imageBytesFuture,
+            builder: (context, snapshot) {
+              if (snapshot.hasData) {
+                return Image.memory(
+                  snapshot.data!,
                   height: 170,
-                  color: AppTheme.deepNavy,
-                  child: const Center(child: Icon(Icons.image_outlined)),
-                )
-              : Image.network(url, height: 170, width: 260, fit: BoxFit.cover),
+                  width: 260,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) =>
+                      _BrokenImagePlaceholder(),
+                );
+              }
+              if (snapshot.hasError) {
+                return const _BrokenImagePlaceholder();
+              }
+              return Container(
+                height: 170,
+                width: 260,
+                color: AppTheme.deepNavy,
+                child: const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            },
+          ),
         ),
-        if (message.body.isNotEmpty) ...[
+        if (widget.message.body.isNotEmpty) ...[
           const SizedBox(height: 8),
-          Text(message.body, style: TextStyle(color: textColor)),
+          Text(widget.message.body, style: TextStyle(color: widget.textColor)),
         ],
       ],
+    );
+  }
+}
+
+class _BrokenImagePlaceholder extends StatelessWidget {
+  const _BrokenImagePlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 170,
+      width: 260,
+      color: AppTheme.deepNavy,
+      child: const Center(child: Icon(Icons.broken_image_outlined)),
     );
   }
 }
@@ -1502,6 +2013,8 @@ class _Composer extends StatefulWidget {
     required this.isSending,
     required this.isRecording,
     required this.recordSeconds,
+    required this.encryptionUnavailable,
+    required this.encryptionUnavailableText,
     required this.onSend,
     required this.onAttach,
     required this.onRecord,
@@ -1515,6 +2028,8 @@ class _Composer extends StatefulWidget {
   final bool isSending;
   final bool isRecording;
   final int recordSeconds;
+  final bool encryptionUnavailable;
+  final String encryptionUnavailableText;
   final VoidCallback onSend;
   final VoidCallback onAttach;
   final VoidCallback onRecord;
@@ -1595,6 +2110,28 @@ class _ComposerState extends State<_Composer> {
             : Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (widget.encryptionUnavailable) ...[
+                    Container(
+                      width: double.infinity,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppTheme.danger.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: AppTheme.danger.withValues(alpha: .28),
+                        ),
+                      ),
+                      child: Text(
+                        widget.encryptionUnavailableText,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
                   if (widget.replyTo != null) ...[
                     Container(
                       width: double.infinity,
@@ -1633,7 +2170,9 @@ class _ComposerState extends State<_Composer> {
                   Row(
                     children: [
                       IconButton.filledTonal(
-                        onPressed: widget.onAttach,
+                        onPressed: widget.encryptionUnavailable
+                            ? null
+                            : widget.onAttach,
                         icon: const Icon(Icons.add_rounded),
                       ),
                       const SizedBox(width: 8),
@@ -1654,12 +2193,17 @@ class _ComposerState extends State<_Composer> {
                       ),
                       const SizedBox(width: 8),
                       IconButton.filledTonal(
-                        onPressed: widget.onRecord,
+                        onPressed: widget.encryptionUnavailable
+                            ? null
+                            : widget.onRecord,
                         icon: const Icon(Icons.mic_none),
                       ),
                       const SizedBox(width: 8),
                       IconButton.filled(
-                        onPressed: _hasText && !widget.isSending
+                        onPressed:
+                            _hasText &&
+                                !widget.isSending &&
+                                !widget.encryptionUnavailable
                             ? widget.onSend
                             : null,
                         icon: const Icon(Icons.send),

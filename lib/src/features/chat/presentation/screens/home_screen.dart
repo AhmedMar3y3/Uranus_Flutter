@@ -13,6 +13,7 @@ import '../../../../shared/widgets/state_placeholder.dart';
 import '../../../../shared/widgets/user_avatar.dart';
 import '../../../presence/data/presence_service.dart';
 import '../../domain/entities/conversation.dart';
+import '../../domain/entities/message.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -25,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> {
   String _filter = 'All';
   late Future<List<Conversation>> _future = _loadConversations();
   StreamSubscription<PresenceUpdate>? _presenceSubscription;
+  final _subscribedConversationIds = <String>{};
 
   @override
   void initState() {
@@ -36,12 +38,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
+    for (final conversationId in _subscribedConversationIds) {
+      unawaited(
+        AppDependencies.pusherChatService.unsubscribeFromConversation(
+          conversationId,
+        ),
+      );
+    }
     _presenceSubscription?.cancel();
     super.dispose();
   }
 
-  Future<List<Conversation>> _loadConversations() {
-    return AppDependencies.chatRepository.getConversations();
+  Future<List<Conversation>> _loadConversations() async {
+    final conversations =
+        await AppDependencies.chatRepository.getConversations();
+    _sortConversations(conversations);
+    unawaited(_subscribeToConversationUpdates(conversations));
+    return conversations;
   }
 
   Future<void> _refresh() async {
@@ -75,6 +88,96 @@ class _HomeScreenState extends State<HomeScreen> {
           );
         }).toList(),
       );
+    });
+  }
+
+  Future<void> _subscribeToConversationUpdates(
+    List<Conversation> conversations,
+  ) async {
+    for (final conversation in conversations) {
+      if (conversation.id.isEmpty) {
+        continue;
+      }
+      _subscribedConversationIds.add(conversation.id);
+      try {
+        await AppDependencies.pusherChatService.subscribeToConversation(
+          conversationId: conversation.id,
+          onMessageSent: _applyLiveMessage,
+          onMessageEdited: _applyLiveMessage,
+          onMessageDeleted: (_) => unawaited(_refresh()),
+          onMessageStatusChanged: (_, _) {},
+          onTypingChanged: (userId, isTyping) => _applyTypingUpdate(
+            conversation.id,
+            userId,
+            isTyping,
+          ),
+        );
+      } catch (_) {
+        // Realtime is retried on the next refresh; the list still loads.
+      }
+    }
+  }
+
+  void _applyLiveMessage(Message message) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _future = _future.then((conversations) async {
+        final index = conversations.indexWhere(
+          (conversation) => conversation.id == message.conversationId,
+        );
+        if (index == -1) {
+          unawaited(_refresh());
+          return conversations;
+        }
+        final conversation = conversations[index];
+        final decrypted = await AppDependencies.e2eeService.decryptMessage(
+          message: message,
+          friend: conversation.friend,
+        );
+        final next = [...conversations];
+        next[index] = conversation.copyWith(
+          latestMessage: decrypted,
+          latestTimestamp: decrypted.sentAt,
+          messages: [decrypted],
+          unreadCount: decrypted.isMine
+              ? conversation.unreadCount
+              : conversation.unreadCount + 1,
+          isTyping: false,
+        );
+        _sortConversations(next);
+        return next;
+      });
+    });
+  }
+
+  void _applyTypingUpdate(
+    String conversationId,
+    String userId,
+    bool isTyping,
+  ) {
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _future = _future.then(
+        (conversations) => conversations.map((conversation) {
+          if (conversation.id != conversationId ||
+              conversation.friend.id != userId) {
+            return conversation;
+          }
+          return conversation.copyWith(isTyping: isTyping);
+        }).toList(),
+      );
+    });
+  }
+
+  void _sortConversations(List<Conversation> conversations) {
+    conversations.sort((a, b) {
+      final aKey = a.latestMessage?.sortKey ?? 0;
+      final bKey = b.latestMessage?.sortKey ?? 0;
+      return bKey.compareTo(aKey);
     });
   }
 
@@ -300,7 +403,7 @@ class _ConversationTile extends StatelessWidget {
         subtitle: Text(
           conversation.isTyping
               ? '${friend.username} is typing...'
-              : latest?.body ?? 'No messages yet',
+              : _conversationPreview(latest),
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
@@ -330,4 +433,19 @@ class _ConversationTile extends StatelessWidget {
       ),
     );
   }
+}
+
+String _conversationPreview(Message? message) {
+  if (message == null) {
+    return 'No messages yet';
+  }
+  if (message.kind == MessageKind.text) {
+    return message.body.isEmpty ? 'Message' : message.body;
+  }
+  return switch (message.kind) {
+    MessageKind.image => message.body.isEmpty ? 'Image' : message.body,
+    MessageKind.file => message.attachment?.name ?? 'File',
+    MessageKind.audio => 'Voice message',
+    MessageKind.text => message.body.isEmpty ? 'Message' : message.body,
+  };
 }

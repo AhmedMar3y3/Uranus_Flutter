@@ -104,6 +104,7 @@ class ApiClient {
     String path, {
     required Map<String, String> fields,
     Map<String, String>? filePaths,
+    Map<String, MultipartBytesFile>? byteFiles,
     String method = 'POST',
   }) async {
     final request = http.MultipartRequest(method, _uri(path));
@@ -113,6 +114,18 @@ class ApiClient {
       for (final entry in filePaths.entries) {
         request.files.add(
           await http.MultipartFile.fromPath(entry.key, entry.value),
+        );
+      }
+    }
+    if (byteFiles != null) {
+      for (final entry in byteFiles.entries) {
+        final file = entry.value;
+        request.files.add(
+          http.MultipartFile.fromBytes(
+            entry.key,
+            file.bytes,
+            filename: file.filename,
+          ),
         );
       }
     }
@@ -236,4 +249,11 @@ class ApiClient {
 
     return decoded;
   }
+}
+
+class MultipartBytesFile {
+  const MultipartBytesFile({required this.bytes, required this.filename});
+
+  final List<int> bytes;
+  final String filename;
 }

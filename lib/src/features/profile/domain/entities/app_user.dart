@@ -17,6 +17,8 @@ class AppUser {
     this.mutualFriendsCount = 0,
     this.friendshipStatus = FriendshipStatus.none,
     this.completedProfile = true,
+    this.publicKey,
+    this.keyId = 'default',
   });
 
   final String id;
@@ -32,6 +34,8 @@ class AppUser {
   final String? imageUrl;
   final FriendshipStatus friendshipStatus;
   final bool completedProfile;
+  final String? publicKey;
+  final String keyId;
 
   String get statusLabel => isOnline ? 'Online now' : 'Last seen $lastSeen';
 
@@ -49,6 +53,8 @@ class AppUser {
     String? imageUrl,
     FriendshipStatus? friendshipStatus,
     bool? completedProfile,
+    String? publicKey,
+    String? keyId,
   }) {
     return AppUser(
       id: id ?? this.id,
@@ -64,6 +70,8 @@ class AppUser {
       imageUrl: imageUrl ?? this.imageUrl,
       friendshipStatus: friendshipStatus ?? this.friendshipStatus,
       completedProfile: completedProfile ?? this.completedProfile,
+      publicKey: publicKey ?? this.publicKey,
+      keyId: keyId ?? this.keyId,
     );
   }
 }

@@ -13,6 +13,11 @@ class MessageMapper {
         : <String, dynamic>{};
     final senderId =
         sender['id']?.toString() ?? json['sender_id']?.toString() ?? '';
+    final receiver = json['receiver'] is Map<String, dynamic>
+        ? json['receiver'] as Map<String, dynamic>
+        : <String, dynamic>{};
+    final receiverId =
+        receiver['id']?.toString() ?? json['receiver_id']?.toString() ?? '';
     final delivered = json['delivered_at'] != null;
     final seen = json['seen_at'] != null;
 
@@ -20,12 +25,14 @@ class MessageMapper {
       id: json['id']?.toString() ?? '',
       conversationId: json['conversation_id']?.toString() ?? '',
       senderId: senderId,
+      receiverId: receiverId,
       body: json['body']?.toString() ?? '',
       sentAt: UserMapper.fromJson({
         'username': 'time',
         'full_name': 'time',
         'last_seen': json['created_at'],
       }).lastSeen,
+      sortKey: _sortKey(json),
       isMine:
           (currentUserId != null && senderId == currentUserId) ||
           (currentUsername != null && sender['username'] == currentUsername),
@@ -44,6 +51,12 @@ class MessageMapper {
             )
           : null,
       isEdited: json['edited_at'] != null,
+      ciphertext: _nonEmpty(json['ciphertext']),
+      nonce: _nonEmpty(json['nonce']),
+      keyId: _nonEmpty(json['key_id']) ?? 'default',
+      encryptionVersion: _nonEmpty(json['encryption_version']),
+      senderPublicKey: _nonEmpty(sender['public_key']),
+      receiverPublicKey: _nonEmpty(receiver['public_key']),
     );
   }
 
@@ -70,6 +83,10 @@ class MessageMapper {
       durationSeconds: value['duration_seconds'] is int
           ? value['duration_seconds'] as int
           : int.tryParse(value['duration_seconds']?.toString() ?? ''),
+      encryptedUrl: _url(
+        value['url'] ?? value['file_url'] ?? value['path'] ?? value['file_path'],
+      ),
+      fileNonce: _nonEmpty(value['file_nonce']),
     );
   }
 
@@ -94,5 +111,25 @@ class MessageMapper {
     }
     final path = text.startsWith('/') ? text : '/$text';
     return '${ApiConfig.baseUrl}$path';
+  }
+
+  static String? _nonEmpty(dynamic value) {
+    final text = value?.toString();
+    if (text == null || text.isEmpty) {
+      return null;
+    }
+    return text;
+  }
+
+  static int _sortKey(Map<String, dynamic> json) {
+    final createdAt = DateTime.tryParse(json['created_at']?.toString() ?? '');
+    if (createdAt != null) {
+      return createdAt.toUtc().millisecondsSinceEpoch;
+    }
+    final id = int.tryParse(json['id']?.toString() ?? '');
+    if (id != null) {
+      return id;
+    }
+    return DateTime.now().millisecondsSinceEpoch;
   }
 }
